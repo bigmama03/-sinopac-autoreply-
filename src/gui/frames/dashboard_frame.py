@@ -419,22 +419,17 @@ class DashboardFrame(ctk.CTkFrame):
         else:
             configured_platforms = []
             all_platforms = list(self._PATROL_PLATFORMS)
+            bm = self.app.browser_manager
             for plat in all_platforms:
                 config = self.app.repo.get_platform_config(plat)
-                if config and config.is_enabled and config.access_token:
-                    if plat == "threads" and not config.threads_user_id:
-                        continue
-                    if plat == "facebook" and not config.page_id:
-                        continue
-                    if plat == "instagram" and not config.ig_user_id:
-                        continue
+                if config and config.is_enabled and bm.has_session(plat):
                     configured_platforms.append(plat)
 
             if not configured_platforms:
                 if CTkMessagebox:
                     CTkMessagebox(
                         title="無法啟動",
-                        message="請先到「設定」頁面設定至少一個平台的 API 憑證",
+                        message="請先到「設定」頁面登入至少一個平台的瀏覽器",
                         icon="warning",
                     )
                 return
@@ -775,18 +770,12 @@ class DashboardFrame(ctk.CTkFrame):
         templates = self.app.template_manager.count()
         self._cards["template_count"].configure(text=str(templates))
 
+        bm = self.app.browser_manager
         for plat_key, label in self._platform_status.items():
             config = repo.get_platform_config(plat_key)
-            if config and config.is_enabled and config.access_token:
-                has_id = (
-                    (plat_key == "threads" and config.threads_user_id) or
-                    (plat_key == "facebook" and config.page_id) or
-                    (plat_key == "instagram" and config.ig_user_id)
-                )
-                if has_id:
-                    label.configure(text="已連線", text_color=("#4CAF50", "#66BB6A"))
-                else:
-                    label.configure(text="缺少 ID", text_color=("#FF9800", "#FFA726"))
+            has_session = bm.has_session(plat_key)
+            if config and config.is_enabled and has_session:
+                label.configure(text="已登入", text_color=("#4CAF50", "#66BB6A"))
             else:
                 label.configure(text="未設定", text_color="gray50")
 
