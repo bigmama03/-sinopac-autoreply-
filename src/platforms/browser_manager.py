@@ -28,7 +28,7 @@ USER_AGENT = (
 # Login detection: URL patterns that indicate a NOT-logged-in state.
 # Includes login pages, 2FA/code-entry pages, and challenge screens.
 _LOGIN_PATTERNS: dict[str, list[str]] = {
-    "threads": ["threads.net/login", "accounts/login", "auth_platform/", "/challenge/", "/checkpoint/"],
+    "threads": ["threads.com/login", "threads.net/login", "accounts/login", "auth_platform/", "/challenge/", "/checkpoint/"],
     "facebook": ["facebook.com/login", "facebook.com/checkpoint", "auth_platform/", "/challenge/"],
     "instagram": ["accounts/login", "auth_platform/", "/challenge/", "/checkpoint/"],
 }
@@ -36,7 +36,7 @@ _LOGIN_PATTERNS: dict[str, list[str]] = {
 # Session cookies that confirm a successful login (name, domain substring)
 _SESSION_COOKIES: dict[str, list[tuple[str, str]]] = {
     # Threads auth goes through Instagram; either cookie suffices
-    "threads": [("sessionid", "threads.net"), ("sessionid", "instagram.com")],
+    "threads": [("sessionid", "threads.com"), ("sessionid", "threads.net"), ("sessionid", "instagram.com")],
     "facebook": [("c_user", "facebook.com")],
     "instagram": [("sessionid", "instagram.com")],
 }

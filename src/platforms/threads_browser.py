@@ -12,15 +12,15 @@ from src.platforms.base import PlatformAdapter
 from src.platforms.browser_manager import BrowserManager
 
 PLATFORM = "threads"
-THREADS_HOME_URL = "https://www.threads.net/"
-SEARCH_URL = "https://www.threads.net/search?q={keyword}&serp_type=default"
+THREADS_HOME_URL = "https://www.threads.com/"
+SEARCH_URL = "https://www.threads.com/search?q={keyword}&serp_type=default"
 
-# Selectors — update when threads.net DOM changes
+# Selectors — update when threads.com DOM changes
 SEL_POST_ARTICLE = "article"
 SEL_POST_LINK = "a[href*='/post/']"
-SEL_POST_LINK_ALT = "a[href*='threads.net/@'][href*='/post/']"
+SEL_POST_LINK_ALT = "a[href*='threads.com/@'][href*='/post/']"
 SEL_PROFILE_LINK = "a[href^='/@']"
-SEL_PROFILE_LINK_ABS = "a[href*='threads.net/@']"
+SEL_PROFILE_LINK_ABS = "a[href*='threads.com/@']"
 SEL_POST_BODY = "[data-pressable-container='true'] span[dir='auto']"
 SEL_POST_BODY_ALT = "div[dir='auto'] span"
 SEL_POST_BODY_FALLBACK = "span[dir='auto']"
@@ -32,7 +32,7 @@ SEL_LOGIN_PASSWORD = "input[type='password']"
 SEL_LOGIN_FORM = "form"
 SEL_LOGGED_IN_PROFILE = "a[href='/'][role='link'], a[href^='/@'][role='link']"
 SEL_REPLY_AUTHOR_LINK = "article a[href^='/@']"
-SEL_REPLY_AUTHOR_LINK_ABS = "article a[href*='threads.net/@']"
+SEL_REPLY_AUTHOR_LINK_ABS = "article a[href*='threads.com/@']"
 SEL_MORE_BUTTON = "svg[aria-label='More'], button[aria-label='More'], div[role='button'][aria-label='More']"
 SEL_MENU_DELETE = "[role='menuitem']"
 SEL_CONFIRM_DELETE = "button"
@@ -368,7 +368,7 @@ class ThreadsBrowserAdapter(PlatformAdapter):
         if href.startswith("http"):
             return href
         if href.startswith("/"):
-            return f"https://www.threads.net{href}"
+            return f"https://www.threads.com{href}"
         return ""
 
     def _find_first_visible(self, page: Page, selectors: tuple[str, ...], timeout: int = 5000) -> Optional[Locator]:

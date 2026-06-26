@@ -204,7 +204,7 @@ class SettingsFrame(ctk.CTkFrame):
 
     def _browser_login(self, platform: str):
         urls = {
-            "threads": "https://www.threads.net/login",
+            "threads": "https://www.threads.com/login",
             "facebook": "https://www.facebook.com/login",
             "instagram": "https://www.instagram.com/accounts/login/",
         }
