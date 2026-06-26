@@ -122,6 +122,15 @@ class InstagramBrowserAdapter(PlatformAdapter):
 
         try:
             with self._bm.locked_page(self._platform) as page:
+                # Quick session check
+                if not self._safe_goto(page, INSTAGRAM_HOME_URL):
+                    logger.error("Instagram fetch_posts: cannot open home page")
+                    return []
+                self._sleep(1.0, 1.5)
+                if self._is_login_page(page):
+                    logger.error("Instagram session invalid (redirected to login: %s)", page.url[:120])
+                    return []
+
                 deduped: dict[str, dict] = {}
                 normalized_keywords = [keyword.strip().lstrip("#") for keyword in keywords if keyword and keyword.strip()]
 

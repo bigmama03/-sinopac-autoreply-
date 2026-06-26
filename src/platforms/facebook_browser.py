@@ -133,6 +133,15 @@ class FacebookBrowserAdapter(PlatformAdapter):
 
         try:
             with self._bm.locked_page("facebook") as page:
+                # Quick session check
+                if not self._safe_goto(page, "https://www.facebook.com", "domcontentloaded", 10000):
+                    logger.error("Facebook fetch_posts: cannot open home page")
+                    return []
+                self._sleep(1.0, 1.5)
+                if self._is_login_visible(page):
+                    logger.error("Facebook session invalid (redirected to login: %s)", page.url[:120])
+                    return []
+
                 deduped: dict[str, dict] = {}
                 normalized_keywords = [keyword.strip() for keyword in keywords if keyword and keyword.strip()]
 
@@ -145,7 +154,7 @@ class FacebookBrowserAdapter(PlatformAdapter):
                         continue
 
                     if not self._wait_for_feed(page):
-                        logger.warning("Facebook search results did not show a feed for keyword=%s", keyword)
+                        logger.warning("Facebook search results did not show a feed for keyword=%s (url=%s)", keyword, page.url[:120])
 
                     self._sleep(1.5, 2.5)
                     self._scroll_page(page, scrolls=4)

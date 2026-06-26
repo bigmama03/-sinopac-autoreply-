@@ -76,19 +76,31 @@ class ThreadsBrowserAdapter(PlatformAdapter):
     def fetch_posts(self, keywords: list[str], since_id: Optional[str] = None) -> list[dict]:
         try:
             with self._bm.locked_page(PLATFORM) as page:
+                # Quick session check: navigate to home and verify logged-in
+                if not self._safe_goto(page, THREADS_HOME_URL, timeout=10000):
+                    logger.error("Threads fetch_posts: cannot open home page")
+                    return []
+                self._sleep(1.0, 1.5)
+                if self._is_login_page(page):
+                    logger.error("Threads session invalid (redirected to login: %s)", page.url[:120])
+                    return []
+
                 deduped: dict[str, dict] = {}
                 for keyword in keywords:
                     kw = keyword.strip()
                     if not kw:
                         continue
                     search_url = SEARCH_URL.format(keyword=urllib.parse.quote(kw))
-                    if not self._safe_goto(page, search_url, timeout=10000):
+                    if not self._safe_goto(page, search_url, timeout=15000):
                         continue
-                    if not self._wait_for_posts(page, timeout=10000):
+                    if not self._wait_for_posts(page, timeout=15000):
                         if self._is_search_empty(page):
                             logger.info("Threads search empty for keyword=%s", kw)
+                        elif self._is_login_page(page):
+                            logger.error("Threads session expired during search (url=%s)", page.url[:120])
+                            return []
                         else:
-                            logger.warning("Threads search did not load for keyword=%s", kw)
+                            logger.warning("Threads search did not load for keyword=%s (url=%s)", kw, page.url[:120])
                         continue
                     for _ in range(3):
                         try:

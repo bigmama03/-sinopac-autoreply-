@@ -25,11 +25,12 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
-# Login detection: URL patterns that indicate a NOT-logged-in state
+# Login detection: URL patterns that indicate a NOT-logged-in state.
+# Includes login pages, 2FA/code-entry pages, and challenge screens.
 _LOGIN_PATTERNS: dict[str, list[str]] = {
-    "threads": ["threads.net/login", "accounts/login"],
-    "facebook": ["facebook.com/login", "facebook.com/checkpoint"],
-    "instagram": ["accounts/login"],
+    "threads": ["threads.net/login", "accounts/login", "auth_platform/", "/challenge/", "/checkpoint/"],
+    "facebook": ["facebook.com/login", "facebook.com/checkpoint", "auth_platform/", "/challenge/"],
+    "instagram": ["accounts/login", "auth_platform/", "/challenge/", "/checkpoint/"],
 }
 
 # Session cookies that confirm a successful login (name, domain substring)

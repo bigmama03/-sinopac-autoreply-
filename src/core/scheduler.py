@@ -197,6 +197,12 @@ class PatrolScheduler:
                         self._emit_log("info", f"[facebook] 目標 {target['target_id']}: 取得 {len(raw)} 篇，新增 {count} 篇")
 
             raw_posts = adapter.fetch_posts(keywords)
+            if not raw_posts and new_count == 0:
+                # Check if empty result is due to session issue (adapter logs error)
+                if not self._browser_manager.has_session(platform):
+                    self._emit_log("error", f"[{platform}] 瀏覽器 session 不存在，請至設定頁面重新登入")
+                    return
+
             processed = self.reply_engine.process_fetched_posts(platform, raw_posts)
             new_count += processed
 
