@@ -27,9 +27,17 @@ USER_AGENT = (
 
 # Login detection: URL patterns that indicate a NOT-logged-in state
 _LOGIN_PATTERNS: dict[str, list[str]] = {
-    "threads": ["login.threads.net", "/login"],
-    "facebook": ["/login", "facebook.com/login"],
+    "threads": ["threads.net/login", "accounts/login"],
+    "facebook": ["facebook.com/login", "facebook.com/checkpoint"],
     "instagram": ["accounts/login"],
+}
+
+# Session cookies that confirm a successful login (name, domain substring)
+_SESSION_COOKIES: dict[str, list[tuple[str, str]]] = {
+    # Threads auth goes through Instagram; either cookie suffices
+    "threads": [("sessionid", "threads.net"), ("sessionid", "instagram.com")],
+    "facebook": [("c_user", "facebook.com")],
+    "instagram": [("sessionid", "instagram.com")],
 }
 
 
@@ -155,11 +163,13 @@ class BrowserManager:
             stealth_sync(ctx)
 
             page = ctx.new_page()
-            page.goto(url, wait_until="domcontentloaded")
+            page.goto(url, wait_until="load")
             logger.info("Interactive login opened for %s — waiting for user", platform)
 
             login_patterns = _LOGIN_PATTERNS.get(platform, [])
             deadline = time.time() + timeout
+            poll_count = 0
+            url_off_login_since: Optional[float] = None  # tracks when URL first left login page
 
             while time.time() < deadline:
                 # Check if user closed the browser
@@ -173,25 +183,43 @@ class BrowserManager:
                     # Page/browser was closed
                     return False
 
-                # Login detected: URL no longer contains login patterns
-                still_on_login = any(pat in current_url for pat in login_patterns)
-                if not still_on_login and login_patterns:
-                    # Give the page a moment to settle after redirect
-                    time.sleep(2)
-                    ctx.storage_state(path=str(session_path))
-                    try:
-                        os.chmod(str(session_path), 0o600)
-                    except OSError:
-                        pass
-                    logger.info("Login successful for %s, session saved", platform)
+                poll_count += 1
+                if poll_count % 5 == 1:  # Log every ~10 seconds
+                    logger.debug("[%s] login poll #%d — url=%s", platform, poll_count, current_url[:120])
 
-                    # Reload main patrol context if it exists
+                still_on_login = any(pat in current_url for pat in login_patterns)
+                has_session_cookie = self._check_login_cookies(ctx, platform)
+
+                # Primary: session cookie confirms login (works for SPAs
+                # where URL stays on /login, and Threads→IG auth flows)
+                if has_session_cookie:
+                    logger.info("[%s] Login detected via cookies (url=%s)", platform, current_url[:80])
+                    time.sleep(2)
+                    self._save_login_session(ctx, session_path)
                     self._reload_context(platform)
                     return True
 
+                # Secondary: URL left login page — wait for cookie confirmation.
+                # Prevents false positive on consent/captcha/error pages.
+                if not still_on_login and login_patterns:
+                    if url_off_login_since is None:
+                        url_off_login_since = time.time()
+                        logger.debug("[%s] URL left login page, waiting for session cookie…", platform)
+                    elif time.time() - url_off_login_since > 15:
+                        # URL stable off login for 15s without cookie — accept
+                        # (handles platforms with unknown cookie names)
+                        logger.warning("[%s] URL off login 15s without session cookie, accepting (url=%s)", platform, current_url[:80])
+                        time.sleep(2)
+                        self._save_login_session(ctx, session_path)
+                        self._reload_context(platform)
+                        return True
+                else:
+                    # URL went back to login page (e.g. after consent screen) — reset
+                    url_off_login_since = None
+
                 time.sleep(2)
 
-            logger.warning("Login timed out for %s after %ds", platform, timeout)
+            logger.warning("Login timed out for %s after %ds (last url=%s)", platform, timeout, current_url[:120])
             return False
 
         except Exception:
@@ -208,6 +236,31 @@ class BrowserManager:
                     pw.stop()
             except Exception:
                 pass
+
+    @staticmethod
+    def _save_login_session(ctx: BrowserContext, session_path: Path) -> None:
+        """Save browser context state to disk after successful login."""
+        ctx.storage_state(path=str(session_path))
+        try:
+            os.chmod(str(session_path), 0o600)
+        except OSError:
+            pass
+        logger.info("Login session saved to %s", session_path.name)
+
+    @staticmethod
+    def _check_login_cookies(ctx: BrowserContext, platform: str) -> bool:
+        """Check if session cookies from a successful login are present."""
+        targets = _SESSION_COOKIES.get(platform, [])
+        if not targets:
+            return False
+        try:
+            cookies = ctx.cookies()
+            for name, domain in targets:
+                if any(c["name"] == name and domain in c.get("domain", "") for c in cookies):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def _reload_context(self, platform: str) -> None:
         """Close and recreate a platform context to pick up a new session file."""
