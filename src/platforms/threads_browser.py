@@ -40,6 +40,12 @@ SEL_NOT_FOUND_TEXT = "text=/not available|unavailable|Sorry, this page isn't ava
 SEL_SEARCH_EMPTY_TEXT = "text=/No results|Try searching for|couldn't find/i"
 SEL_SUBMIT_BUTTON = "div[role='button']"
 
+# Login/register modal overlay that appears for logged-out or partially-authed users
+SEL_MODAL_CONTINUE_INSTAGRAM = "div[role='button']:has-text('使用 Instagram 帳號繼續'), button:has-text('使用 Instagram 帳號繼續')"
+SEL_MODAL_CONTINUE_INSTAGRAM_EN = "div[role='button']:has-text('Continue with Instagram'), button:has-text('Continue with Instagram')"
+SEL_MODAL_LOGIN_BUTTON = "div[role='button']:has-text('登入'), button:has-text('登入')"
+SEL_MODAL_CLOSE = "div[role='dialog'] svg[aria-label='Close'], div[role='dialog'] button[aria-label='Close'], div[role='dialog'] [aria-label='關閉']"
+
 BUTTON_TEXT_REPLY = "Reply"
 BUTTON_TEXT_POST = "Post"
 BUTTON_TEXT_DELETE = "Delete"
@@ -59,6 +65,7 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                 if not self._safe_goto(page, THREADS_HOME_URL, timeout=10000):
                     return False, "無法開啟 Threads"
                 self._sleep(1.0, 1.8)
+                self._dismiss_login_modal(page)
                 if self._is_login_page(page):
                     return False, "未登入 Threads"
                 username = self._get_own_username(page)
@@ -81,6 +88,7 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                     logger.error("Threads fetch_posts: cannot open home page")
                     return []
                 self._sleep(1.0, 1.5)
+                self._dismiss_login_modal(page)
                 if self._is_login_page(page):
                     logger.error("Threads session invalid (redirected to login: %s)", page.url[:120])
                     return []
@@ -93,6 +101,11 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                     search_url = SEARCH_URL.format(keyword=urllib.parse.quote(kw))
                     if not self._safe_goto(page, search_url, timeout=15000):
                         continue
+                    # Dismiss login modal that may overlay search results
+                    self._sleep(1.0, 2.0)
+                    dismissed = self._dismiss_login_modal(page)
+                    if dismissed:
+                        logger.info("Modal dismissed for keyword=%s, re-waiting for posts", kw)
                     if not self._wait_for_posts(page, timeout=15000):
                         if self._is_search_empty(page):
                             logger.info("Threads search empty for keyword=%s", kw)
@@ -100,7 +113,16 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                             logger.error("Threads session expired during search (url=%s)", page.url[:120])
                             return []
                         else:
-                            logger.warning("Threads search did not load for keyword=%s (url=%s)", kw, page.url[:120])
+                            # Debug: log page state for troubleshooting
+                            try:
+                                article_count = page.locator("article").count()
+                                body_text = page.locator("body").inner_text(timeout=3000)[:300]
+                                logger.warning(
+                                    "Threads search did not load for keyword=%s (url=%s, articles=%d, body_preview=%s)",
+                                    kw, page.url[:120], article_count, body_text[:200],
+                                )
+                            except Exception:
+                                logger.warning("Threads search did not load for keyword=%s (url=%s)", kw, page.url[:120])
                         continue
                     for _ in range(3):
                         try:
@@ -124,6 +146,7 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                 # post_id is the full post URL
                 if not self._safe_goto(page, post_id, timeout=10000):
                     return False, None, "無法開啟 Threads 貼文"
+                self._dismiss_login_modal(page)
                 input_loc = self._find_first_visible(
                     page, (SEL_REPLY_INPUT, SEL_REPLY_INPUT_ALT, SEL_REPLY_INPUT_FALLBACK), timeout=10000,
                 )
@@ -227,6 +250,99 @@ class ThreadsBrowserAdapter(PlatformAdapter):
             return False, "刪除操作失敗"
 
     # ── Private helpers (receive page as parameter, no lock needed) ──
+
+    def _dismiss_login_modal(self, page: Page) -> bool:
+        """Detect and dismiss the Threads login/register modal overlay.
+
+        Returns True if a modal was found and dismissed, False otherwise.
+        The modal shows "透過 Threads 暢所欲言" with a
+        "使用 Instagram 帳號繼續 <username>" button.
+        """
+        # Strategy 1: text-based search for "使用 Instagram 帳號繼續" button
+        # Using get_by_text for robust partial matching regardless of element type
+        for text_pattern in ("使用 Instagram 帳號繼續", "Continue with Instagram"):
+            try:
+                loc = page.get_by_text(text_pattern).first
+                if loc.is_visible(timeout=2000):
+                    logger.info("Threads login modal detected (text='%s'), clicking to dismiss", text_pattern)
+                    loc.click(timeout=5000)
+                    time.sleep(random.uniform(2.5, 4.0))
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=10000)
+                    except Exception:
+                        pass
+                    logger.info("Threads login modal dismissed (url=%s)", page.url[:120])
+                    try:
+                        self._bm.save_session(PLATFORM)
+                    except Exception:
+                        pass
+                    return True
+            except Exception:
+                pass
+
+        # Strategy 2: CSS selector-based search
+        for sel in (SEL_MODAL_CONTINUE_INSTAGRAM, SEL_MODAL_CONTINUE_INSTAGRAM_EN):
+            try:
+                loc = page.locator(sel).first
+                if loc.is_visible(timeout=1000):
+                    logger.info("Threads login modal detected (css), clicking to dismiss")
+                    loc.click(timeout=5000)
+                    time.sleep(random.uniform(2.5, 4.0))
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=10000)
+                    except Exception:
+                        pass
+                    logger.info("Threads login modal dismissed (url=%s)", page.url[:120])
+                    try:
+                        self._bm.save_session(PLATFORM)
+                    except Exception:
+                        pass
+                    return True
+            except Exception:
+                pass
+
+        # Strategy 3: close modal via X button
+        try:
+            close_btn = page.locator(SEL_MODAL_CLOSE).first
+            if close_btn.is_visible(timeout=1000):
+                logger.info("Threads modal detected, closing via X button")
+                close_btn.click(timeout=3000)
+                time.sleep(random.uniform(0.5, 1.0))
+                return True
+        except Exception:
+            pass
+
+        # Strategy 4: detect modal by its title text and try clicking any button inside
+        for modal_title in ("透過 Threads 暢所欲言", "Say more on Threads"):
+            try:
+                title_loc = page.get_by_text(modal_title)
+                if title_loc.is_visible(timeout=1000):
+                    logger.info("Threads modal overlay detected by title '%s'", modal_title)
+                    # Find and click the first prominent button near the title
+                    # The "Continue with Instagram" button is usually a role=button or <button>
+                    buttons = page.locator("div[role='button'], button").all()
+                    for btn in buttons[:10]:
+                        try:
+                            btn_text = btn.inner_text(timeout=1000)
+                            if "instagram" in btn_text.lower() or "繼續" in btn_text or "登入" in btn_text:
+                                logger.info("Clicking modal button: '%s'", btn_text.strip()[:60])
+                                btn.click(timeout=5000)
+                                time.sleep(random.uniform(2.5, 4.0))
+                                try:
+                                    page.wait_for_load_state("domcontentloaded", timeout=10000)
+                                except Exception:
+                                    pass
+                                try:
+                                    self._bm.save_session(PLATFORM)
+                                except Exception:
+                                    pass
+                                return True
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+        return False
 
     def _safe_goto(self, page: Page, url: str, wait_until: str = "domcontentloaded", timeout: int = 15000) -> bool:
         try:
