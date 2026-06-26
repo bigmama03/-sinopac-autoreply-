@@ -60,17 +60,15 @@ class RateLimiter:
 
 
 class PlatformRateLimiters:
-    """Pre-configured rate limiters for each platform."""
+    """Pre-configured rate limiters for each platform (browser-based)."""
 
     def __init__(self):
-        # Threads: 2200 keyword searches / 24h
-        self.threads_search = RateLimiter(max_tokens=2200, refill_period_sec=86400)
-        # Threads: 250 posts / 24h (replies may not count, but be safe)
-        self.threads_reply = RateLimiter(max_tokens=250, refill_period_sec=86400)
+        # Per-platform reply limiters (prevent comment spam)
+        self.threads_reply = RateLimiter(max_tokens=40, refill_period_sec=86400)
+        self.facebook_reply = RateLimiter(max_tokens=25, refill_period_sec=86400)
+        self.instagram_reply = RateLimiter(max_tokens=25, refill_period_sec=86400)
 
-        # Facebook: 200 calls / hour / token
-        self.facebook = RateLimiter(max_tokens=200, refill_period_sec=3600)
-
-        # Instagram: 200 calls / hour, 30 hashtags / 7 days
-        self.instagram_api = RateLimiter(max_tokens=200, refill_period_sec=3600)
-        self.instagram_hashtag = RateLimiter(max_tokens=30, refill_period_sec=604800)
+        # Per-platform browse limiters (prevent too-frequent page loads)
+        self.threads_browse = RateLimiter(max_tokens=60, refill_period_sec=3600)
+        self.facebook_browse = RateLimiter(max_tokens=60, refill_period_sec=3600)
+        self.instagram_browse = RateLimiter(max_tokens=60, refill_period_sec=3600)

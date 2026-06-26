@@ -4,12 +4,12 @@ import logging
 from typing import Optional, Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.data.repository import Repository
 from src.core.reply_engine import ReplyEngine
 from src.platforms.rate_limiter import PlatformRateLimiters
-from src.utils.crypto import decrypt_token
 
 logger = logging.getLogger(__name__)
 
@@ -19,29 +19,47 @@ class PatrolScheduler:
 
     def __init__(self, repo: Repository, reply_engine: ReplyEngine,
                  rate_limiters: PlatformRateLimiters,
+                 browser_manager=None,
                  on_new_posts: Optional[Callable[[int], None]] = None,
-                 on_shadowban: Optional[Callable[[str, int], None]] = None):
+                 on_shadowban: Optional[Callable[[str, int], None]] = None,
+                 on_patrol_log: Optional[Callable[[str, str], None]] = None):
         self.repo = repo
         self.reply_engine = reply_engine
         self.limiters = rate_limiters
         self.on_new_posts = on_new_posts
         self.on_shadowban = on_shadowban
+        self.on_patrol_log = on_patrol_log
 
         self._scheduler: Optional[BackgroundScheduler] = None
         self._running = False
         self._session_id: Optional[int] = None
+        self.active_platforms: Optional[list[str]] = None
+        self._browser_manager = browser_manager
 
     @property
     def is_running(self) -> bool:
         return self._running
 
-    def start(self):
+    def start(self, platforms: Optional[list[str]] = None):
         if self._running:
             return
 
+        # Early reject empty selection
+        if platforms is not None and len(platforms) == 0:
+            logger.warning("No platforms selected")
+            return
+
         # Register platform adapters on the injected reply engine.
+        # Build into a temp dict first; only replace on success.
+        old_adapters = dict(self.reply_engine.adapters)
         self.reply_engine.adapters.clear()
-        self._register_adapters()
+        try:
+            self._register_adapters(platforms)
+        except Exception:
+            # Rollback on unexpected failure
+            self.reply_engine.adapters.update(old_adapters)
+            raise
+        self.active_platforms = list(self.reply_engine.adapters.keys())
 
         if not self.reply_engine.adapters:
             logger.warning("No platform adapters configured")
@@ -49,26 +67,19 @@ class PatrolScheduler:
 
         self._scheduler = BackgroundScheduler(daemon=True)
 
-        # Patrol jobs
-        if "threads" in self.reply_engine.adapters:
-            interval = self._safe_int("polling_interval_threads_sec", 300)
+        # Patrol jobs — recurring + immediate first run
+        for plat, default_sec in [("threads", 300), ("facebook", 120), ("instagram", 300)]:
+            if plat not in self.reply_engine.adapters:
+                continue
+            interval = self._safe_int(f"polling_interval_{plat}_sec", default_sec)
             self._scheduler.add_job(
                 self._patrol, IntervalTrigger(seconds=interval),
-                args=["threads"], id="patrol_threads", replace_existing=True,
+                args=[plat], id=f"patrol_{plat}", replace_existing=True,
             )
-
-        if "facebook" in self.reply_engine.adapters:
-            interval = self._safe_int("polling_interval_facebook_sec", 120)
+            # Run first patrol immediately (within 2 seconds)
             self._scheduler.add_job(
-                self._patrol, IntervalTrigger(seconds=interval),
-                args=["facebook"], id="patrol_facebook", replace_existing=True,
-            )
-
-        if "instagram" in self.reply_engine.adapters:
-            interval = self._safe_int("polling_interval_instagram_sec", 300)
-            self._scheduler.add_job(
-                self._patrol, IntervalTrigger(seconds=interval),
-                args=["instagram"], id="patrol_instagram", replace_existing=True,
+                self._patrol, DateTrigger(),
+                args=[plat], id=f"patrol_{plat}_init",
             )
 
         # Reply sender (every 30 seconds)
@@ -83,11 +94,15 @@ class PatrolScheduler:
             id="shadowban_check", replace_existing=True,
         )
 
+        # Create session before starting scheduler so _session_id is set
+        # when the immediate DateTrigger patrol jobs fire.
+        platforms = list(self.reply_engine.adapters.keys())
+        self._session_id = self.repo.start_patrol_session(platforms)
+
         self._scheduler.start()
         self._running = True
 
-        platforms = list(self.reply_engine.adapters.keys())
-        self._session_id = self.repo.start_patrol_session(platforms)
+        self._emit_log("success", f"海巡已啟動，平台: {', '.join(p.capitalize() for p in platforms)}")
         self.repo.log_audit("PATROL_STARTED", {
             "platforms": platforms,
             "session_id": self._session_id,
@@ -96,7 +111,7 @@ class PatrolScheduler:
 
     def stop(self):
         if self._scheduler and self._running:
-            self._scheduler.shutdown(wait=False)
+            self._scheduler.shutdown(wait=True)
             self._scheduler = None
             self._running = False
 
@@ -111,83 +126,81 @@ class PatrolScheduler:
                 self.repo.log_audit("PATROL_STOPPED", {})
                 logger.info("Patrol stopped")
 
+    def _emit_log(self, level: str, message: str):
+        """Emit a patrol log message to the GUI callback."""
+        if self.on_patrol_log:
+            self.on_patrol_log(level, message)
+
     def _safe_int(self, setting_key: str, default: int) -> int:
         try:
             return int(self.repo.get_setting(setting_key, str(default)))
         except (ValueError, TypeError):
             return default
 
-    def _register_adapters(self):
-        # Threads
-        t_config = self.repo.get_platform_config("threads")
-        if t_config and t_config.is_enabled and t_config.access_token:
-            try:
-                token = decrypt_token(t_config.access_token)
-                if token and t_config.threads_user_id:
-                    from src.platforms.threads_adapter import ThreadsAdapter
-                    self.reply_engine.register_adapter("threads", ThreadsAdapter(
-                        user_id=t_config.threads_user_id,
-                        access_token=token,
-                        search_limiter=self.limiters.threads_search,
-                        reply_limiter=self.limiters.threads_reply,
-                    ))
-            except ValueError as e:
-                logger.error("Threads token decrypt failed: %s", e)
+    def _register_adapters(self, platforms: Optional[list[str]] = None):
+        platform_filter = set(platforms) if platforms is not None else None
 
-        # Facebook
-        fb_config = self.repo.get_platform_config("facebook")
-        if fb_config and fb_config.is_enabled and fb_config.access_token:
-            try:
-                token = decrypt_token(fb_config.access_token)
-                if token and fb_config.page_id:
-                    from src.platforms.facebook_adapter import FacebookAdapter
-                    self.reply_engine.register_adapter("facebook", FacebookAdapter(
-                        page_id=fb_config.page_id,
-                        access_token=token,
-                        app_id=fb_config.app_id or "",
-                        rate_limiter=self.limiters.facebook,
-                    ))
-            except ValueError as e:
-                logger.error("Facebook token decrypt failed: %s", e)
+        if self._browser_manager is None:
+            raise RuntimeError("BrowserManager not injected — cannot register adapters")
 
-        # Instagram
-        ig_config = self.repo.get_platform_config("instagram")
-        if ig_config and ig_config.is_enabled and ig_config.access_token:
+        for plat in ('threads', 'facebook', 'instagram'):
+            if platform_filter is not None and plat not in platform_filter:
+                continue
+
+            config = self.repo.get_platform_config(plat)
+            if not config or not config.is_enabled:
+                continue
+
+            if not self._browser_manager.has_session(plat):
+                self._emit_log('warning', f'[{plat}] 尚未登入，請至設定頁面登入')
+                continue
+
             try:
-                token = decrypt_token(ig_config.access_token)
-                if token and ig_config.ig_user_id:
-                    from src.platforms.instagram_adapter import InstagramAdapter
-                    self.reply_engine.register_adapter("instagram", InstagramAdapter(
-                        ig_user_id=ig_config.ig_user_id,
-                        access_token=token,
-                        api_limiter=self.limiters.instagram_api,
-                        hashtag_limiter=self.limiters.instagram_hashtag,
-                    ))
-            except ValueError as e:
-                logger.error("Instagram token decrypt failed: %s", e)
+                if plat == 'threads':
+                    from src.platforms.threads_browser import ThreadsBrowserAdapter
+                    self.reply_engine.register_adapter(plat, ThreadsBrowserAdapter(self._browser_manager))
+                elif plat == 'facebook':
+                    from src.platforms.facebook_browser import FacebookBrowserAdapter
+                    self.reply_engine.register_adapter(plat, FacebookBrowserAdapter(self._browser_manager))
+                elif plat == 'instagram':
+                    from src.platforms.instagram_browser import InstagramBrowserAdapter
+                    self.reply_engine.register_adapter(plat, InstagramBrowserAdapter(self._browser_manager))
+            except Exception as e:
+                self._emit_log('error', f'[{plat}] 建立瀏覽器 adapter 失敗: {e}')
+                logger.exception('Failed to create browser adapter for %s', plat)
 
     def _patrol(self, platform: str):
         try:
             adapter = self.reply_engine.adapters.get(platform)
             if not adapter:
+                self._emit_log("warning", f"[{platform}] 無可用的 adapter")
                 return
 
             keywords = [kw.keyword for kw in self.repo.get_all_keywords(active_only=True)]
             if not keywords:
+                self._emit_log("warning", f"[{platform}] 無啟用中的關鍵字，跳過海巡")
                 return
+
+            self._emit_log("info", f"[{platform}] 開始海巡，共 {len(keywords)} 個關鍵字: {', '.join(keywords[:10])}{'...' if len(keywords) > 10 else ''}")
 
             new_count = 0
 
             # For Facebook, also patrol monitored targets
-            if platform == "facebook":
-                from src.platforms.facebook_adapter import FacebookAdapter
-                if isinstance(adapter, FacebookAdapter):
-                    for target in self.repo.get_fb_monitor_targets(active_only=True):
+            if platform == "facebook" and hasattr(adapter, "fetch_from_target"):
+                targets = self.repo.get_fb_monitor_targets(active_only=True)
+                if targets:
+                    self._emit_log("info", f"[facebook] 監控目標: {len(targets)} 個")
+                    for target in targets:
                         raw = adapter.fetch_from_target(target["target_id"], keywords)
-                        new_count += self.reply_engine.process_fetched_posts(platform, raw)
+                        count = self.reply_engine.process_fetched_posts(platform, raw)
+                        new_count += count
+                        self._emit_log("info", f"[facebook] 目標 {target['target_id']}: 取得 {len(raw)} 篇，新增 {count} 篇")
 
             raw_posts = adapter.fetch_posts(keywords)
-            new_count += self.reply_engine.process_fetched_posts(platform, raw_posts)
+            processed = self.reply_engine.process_fetched_posts(platform, raw_posts)
+            new_count += processed
+
+            self._emit_log("info", f"[{platform}] 搜尋到 {len(raw_posts)} 篇貼文，新增相關 {processed} 篇")
 
             if new_count > 0:
                 if self._session_id:
@@ -196,9 +209,13 @@ class PatrolScheduler:
                     )
                 if self.on_new_posts:
                     self.on_new_posts(new_count)
+                self._emit_log("success", f"[{platform}] 本次海巡偵測到 {new_count} 篇新貼文")
+            else:
+                self._emit_log("info", f"[{platform}] 本次海巡無新貼文")
 
             logger.info("Patrol %s: %d new relevant posts", platform, new_count)
         except Exception as e:
+            self._emit_log("error", f"[{platform}] 海巡錯誤: {e}")
             logger.exception("Patrol %s error: %s", platform, e)
 
     def _send_replies(self):
@@ -209,8 +226,10 @@ class PatrolScheduler:
                     self.repo.update_patrol_session_counts(
                         self._session_id, replied_delta=sent,
                     )
+                self._emit_log("success", f"已發送 {sent} 則回覆")
                 logger.info("Sent %d replies", sent)
         except Exception as e:
+            self._emit_log("error", f"回覆發送錯誤: {e}")
             logger.exception("Reply sender error: %s", e)
 
     def _check_shadowban(self):

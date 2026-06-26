@@ -18,6 +18,8 @@ else:
     APP_DATA_DIR = os.path.join(os.path.expanduser("~"), ".sinopac_autoreply")
 
 os.makedirs(APP_DATA_DIR, exist_ok=True)
+BROWSER_DATA_DIR = os.path.join(APP_DATA_DIR, 'browser_sessions')
+os.makedirs(BROWSER_DATA_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(APP_DATA_DIR, "sinopac_autoreply.db")
 LOG_DIR = os.path.join(APP_DATA_DIR, "logs")

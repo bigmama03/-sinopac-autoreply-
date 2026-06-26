@@ -5,6 +5,8 @@ import csv
 import customtkinter as ctk
 from tkinter import filedialog
 
+from src.gui.widgets.toast import show_toast
+
 try:
     from CTkMessagebox import CTkMessagebox
 except ImportError:
@@ -55,7 +57,7 @@ class KeywordsFrame(ctk.CTkFrame):
 
         filter_row = ctk.CTkFrame(self, fg_color="transparent")
         filter_row.grid(row=2, column=0, sticky="ew", pady=(0, 10))
-        filter_row.grid_columnconfigure(2, weight=1)
+        filter_row.grid_columnconfigure(3, weight=1)
 
         self._search_entry = ctk.CTkEntry(
             filter_row,
@@ -74,6 +76,16 @@ class KeywordsFrame(ctk.CTkFrame):
             command=lambda _value: self._apply_filter(),
         )
         self._filter_category_menu.grid(row=0, column=1, sticky="w")
+
+        self._sort_var = ctk.StringVar(value="權重高→低")
+        self._sort_menu = ctk.CTkOptionMenu(
+            filter_row,
+            values=["權重高→低", "權重低→高", "名稱 A→Z", "名稱 Z→A"],
+            variable=self._sort_var,
+            width=140,
+            command=lambda _value: self._apply_filter(),
+        )
+        self._sort_menu.grid(row=0, column=2, padx=(8, 0), sticky="w")
 
         self._scroll_frame = ctk.CTkScrollableFrame(self)
         self._scroll_frame.grid(row=3, column=0, sticky="nsew")
@@ -109,7 +121,7 @@ class KeywordsFrame(ctk.CTkFrame):
             self.app.repo.upsert_keyword(entry["keyword"], entry["category"], entry["weight"])
             imported += 1
         self.app.repo.log_audit("KEYWORDS_IMPORTED", {"count": imported, "file": file_path})
-        self._show_message("匯入完成", f"成功匯入 {imported} 個關鍵字", "check")
+        show_toast(self, f"成功匯入 {imported} 個關鍵字", "success")
         self.refresh()
 
     def _download_template(self):
@@ -145,6 +157,7 @@ class KeywordsFrame(ctk.CTkFrame):
             "keyword_id": keyword_id,
             "keyword": keyword_obj.keyword if keyword_obj else None,
         })
+        show_toast(self, f"已刪除關鍵字「{keyword_obj.keyword}」", "success")
         self.refresh()
 
     def _create_keyword_card(self, keyword, index: int) -> ctk.CTkFrame:
@@ -165,12 +178,19 @@ class KeywordsFrame(ctk.CTkFrame):
             text_color=("blue", "#64B5F6"),
         ).grid(row=0, column=1, sticky="w", padx=(0, 8), pady=10)
 
-        ctk.CTkLabel(
+        weight_label = ctk.CTkLabel(
             card,
-            text=f"weight {keyword.weight:.1f}",
+            text=f"權重 {keyword.weight:.1f}",
             text_color="gray60",
             font=ctk.CTkFont(size=12),
-        ).grid(row=0, column=2, sticky="w", padx=(0, 12), pady=10)
+        )
+        weight_label.grid(row=0, column=2, sticky="w", padx=(0, 12), pady=10)
+        weight_label.bind("<Enter>", lambda e, w=weight_label: w.configure(
+            text=f"權重 {keyword.weight:.1f}（越高越優先匹配）"
+        ))
+        weight_label.bind("<Leave>", lambda e, w=weight_label, kw=keyword: w.configure(
+            text=f"權重 {kw.weight:.1f}"
+        ))
 
         ctk.CTkButton(
             card,
@@ -199,6 +219,17 @@ class KeywordsFrame(ctk.CTkFrame):
             if search_text in keyword.keyword.lower()
             and (category == "全部分類" or keyword.category == category)
         ]
+
+        # Sort (secondary key for deterministic tie-breaking)
+        sort_mode = self._sort_var.get()
+        if sort_mode == "權重高→低":
+            filtered.sort(key=lambda k: (-k.weight, k.keyword.lower()))
+        elif sort_mode == "權重低→高":
+            filtered.sort(key=lambda k: (k.weight, k.keyword.lower()))
+        elif sort_mode == "名稱 A→Z":
+            filtered.sort(key=lambda k: (k.keyword.lower(), -k.weight))
+        elif sort_mode == "名稱 Z→A":
+            filtered.sort(key=lambda k: k.keyword.lower(), reverse=True)
 
         total = len(self._all_keywords)
         if len(filtered) == total:

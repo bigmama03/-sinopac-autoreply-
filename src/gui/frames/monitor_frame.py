@@ -2,7 +2,11 @@
 
 import json
 import webbrowser
+from datetime import datetime
 import customtkinter as ctk
+
+from src.gui.widgets.expandable_text import ExpandableText
+from src.gui.widgets.toast import show_toast
 
 try:
     from CTkMessagebox import CTkMessagebox
@@ -34,7 +38,8 @@ class MonitorFrame(ctk.CTkFrame):
         self.app = app
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(3, weight=3)
+        self.grid_rowconfigure(5, weight=1)
 
         # Title + status
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -137,12 +142,55 @@ class MonitorFrame(ctk.CTkFrame):
         self._displayed = 0
         self._check_vars: dict[int, ctk.StringVar] = {}  # post.id -> var
 
+        # Patrol log panel
+        log_header = ctk.CTkFrame(self, fg_color="transparent")
+        log_header.grid(row=4, column=0, sticky="ew", pady=(8, 2))
+        log_header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            log_header, text="海巡活動日誌",
+            font=ctk.CTkFont(size=13, weight="bold"),
+        ).grid(row=0, column=0, sticky="w")
+
+        log_btn_frame = ctk.CTkFrame(log_header, fg_color="transparent")
+        log_btn_frame.grid(row=0, column=1, sticky="e")
+
+        self._log_follow = True
+        self._follow_btn = ctk.CTkButton(
+            log_btn_frame, text="暫停追蹤", width=80, height=24,
+            font=ctk.CTkFont(size=10),
+            fg_color="transparent", border_width=1,
+            command=self._toggle_log_follow,
+        )
+        self._follow_btn.pack(side="left", padx=(0, 4))
+
+        ctk.CTkButton(
+            log_btn_frame, text="清除", width=50, height=24,
+            font=ctk.CTkFont(size=10),
+            fg_color="transparent", border_width=1,
+            command=self._clear_patrol_log,
+        ).pack(side="left")
+
+        self._log_textbox = ctk.CTkTextbox(
+            self, height=150, font=ctk.CTkFont(family="monospace", size=11),
+            state="disabled", wrap="word",
+        )
+        self._log_textbox.grid(row=5, column=0, sticky="nsew")
+        self._patrol_log_lines: list[str] = []
+        self._max_log_lines = 200
+
     _STATUS_PRIORITY = {
         "pending": 0, "approved": 1, "failed": 2,
         "replied": 3, "skipped": 4, "rejected": 5,
     }
 
     def refresh(self):
+        # Flush any buffered patrol logs from before this frame existed
+        if hasattr(self.app, "_patrol_log_buffer") and self.app._patrol_log_buffer:
+            for level, message in self.app._patrol_log_buffer:
+                self.append_patrol_log(level, message)
+            self.app._patrol_log_buffer.clear()
+
         # Update patrol indicator
         if self.app.scheduler.is_running:
             self._patrol_indicator.configure(text="海巡中...")
@@ -202,13 +250,42 @@ class MonitorFrame(ctk.CTkFrame):
 
         if not posts:
             self._count_label.configure(text=f"顯示 0 / 共 {total} 筆")
-            empty = ctk.CTkLabel(
-                self._scroll_frame,
-                text="尚無偵測到的貼文\n啟動海巡後，相關貼文會出現在這裡",
-                text_color="gray50", font=ctk.CTkFont(size=14),
+            empty_frame = ctk.CTkFrame(self._scroll_frame, fg_color="transparent")
+            empty_frame.grid(row=0, column=0, pady=40)
+
+            # Contextual empty state based on patrol status and filters
+            is_patrolling = self.app.scheduler.is_running
+            has_filters = (
+                self._platform_filter.get() != "全部"
+                or self._status_filter.get() != "全部"
+                or self._search_var.get().strip()
             )
-            empty.grid(row=0, column=0, pady=40)
-            self._post_widgets.append(empty)
+
+            if has_filters and total > 0:
+                empty_text = "沒有符合篩選條件的貼文\n\n試著調整篩選條件"
+                btn_text = None
+            elif is_patrolling:
+                empty_text = "海巡進行中，尚未偵測到相關貼文\n\n系統正在搜尋中，請稍候..."
+                btn_text = None
+            else:
+                empty_text = "尚無偵測到的貼文\n\n啟動海巡後，相關貼文會出現在這裡"
+                btn_text = "前往總覽啟動海巡"
+
+            ctk.CTkLabel(
+                empty_frame,
+                text=empty_text,
+                text_color="gray50", font=ctk.CTkFont(size=14),
+                justify="center",
+            ).pack(pady=(0, 12))
+
+            if btn_text:
+                ctk.CTkButton(
+                    empty_frame, text=btn_text,
+                    width=160, height=32,
+                    fg_color="transparent", border_width=1,
+                    command=lambda: self.app._show_frame("dashboard"),
+                ).pack()
+            self._post_widgets.append(empty_frame)
             return
 
         self._load_more()
@@ -301,14 +378,11 @@ class MonitorFrame(ctk.CTkFrame):
                 font=ctk.CTkFont(size=10), text_color=score_color,
             ).pack(side="right", padx=10)
 
-        # Row 1: content preview
-        preview = (post.post_content or "")[:200]
-        if len(post.post_content or "") > 200:
-            preview += "..."
-        ctk.CTkLabel(
-            card, text=preview, wraplength=700, justify="left",
-            font=ctk.CTkFont(size=12),
-        ).grid(row=1, column=1, sticky="w", padx=10, pady=(2, 4))
+        # Row 1: content preview (expandable)
+        ExpandableText(
+            card, text=post.post_content or "", max_preview=100,
+            wraplength=700, font=ctk.CTkFont(size=12),
+        ).grid(row=1, column=1, sticky="ew", padx=10, pady=(2, 4))
 
         # Row 2: matched keywords + actions
         footer = ctk.CTkFrame(card, fg_color="transparent")
@@ -380,6 +454,7 @@ class MonitorFrame(ctk.CTkFrame):
                 return
         deleted = self.app.repo.delete_detected_posts(ids)
         self.app.repo.log_audit("BATCH_DELETE_POSTS", {"count": deleted, "post_ids": ids})
+        show_toast(self, f"已刪除 {deleted} 筆貼文", "success")
         self.refresh()
 
     def _batch_skip(self):
@@ -389,6 +464,7 @@ class MonitorFrame(ctk.CTkFrame):
         for pid in ids:
             self.app.repo.update_post_status(pid, "skipped")
         self.app.repo.log_audit("BATCH_SKIP_POSTS", {"count": len(ids)})
+        show_toast(self, f"已跳過 {len(ids)} 筆貼文", "info")
         self.refresh()
 
     def _parse_keywords(self, raw) -> list[str]:
@@ -404,3 +480,50 @@ class MonitorFrame(ctk.CTkFrame):
         except (json.JSONDecodeError, TypeError):
             pass
         return []
+
+    # -- Patrol log panel --
+
+    _LOG_LEVEL_PREFIX = {
+        "info": "INFO",
+        "success": "OK  ",
+        "warning": "WARN",
+        "error": "ERR ",
+    }
+
+    def append_patrol_log(self, level: str, message: str):
+        """Append a line to the patrol activity log (called from GUI thread)."""
+        ts = datetime.now().strftime("%H:%M:%S")
+        prefix = self._LOG_LEVEL_PREFIX.get(level, "INFO")
+        line = f"[{ts}] [{prefix}] {message}"
+
+        self._patrol_log_lines.append(line)
+
+        self._log_textbox.configure(state="normal")
+        self._log_textbox.insert("end", line + "\n")
+
+        # Keep textbox in sync with max_log_lines cap
+        if len(self._patrol_log_lines) > self._max_log_lines:
+            overflow = len(self._patrol_log_lines) - self._max_log_lines
+            self._patrol_log_lines = self._patrol_log_lines[-self._max_log_lines:]
+            self._log_textbox.delete("1.0", f"{overflow + 1}.0")
+
+        if self._log_follow:
+            self._log_textbox.see("end")
+        self._log_textbox.configure(state="disabled")
+
+    def _toggle_log_follow(self):
+        self._log_follow = not self._log_follow
+        if self._log_follow:
+            self._follow_btn.configure(text="暫停追蹤")
+            # Jump to end
+            self._log_textbox.configure(state="normal")
+            self._log_textbox.see("end")
+            self._log_textbox.configure(state="disabled")
+        else:
+            self._follow_btn.configure(text="繼續追蹤")
+
+    def _clear_patrol_log(self):
+        self._patrol_log_lines.clear()
+        self._log_textbox.configure(state="normal")
+        self._log_textbox.delete("1.0", "end")
+        self._log_textbox.configure(state="disabled")

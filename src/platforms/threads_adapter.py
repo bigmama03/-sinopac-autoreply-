@@ -1,6 +1,7 @@
 """Threads API adapter — keyword search + reply."""
 
 import logging
+import threading
 from typing import Optional
 
 import requests
@@ -22,8 +23,15 @@ class ThreadsAdapter(PlatformAdapter):
         self.access_token = access_token
         self.search_limiter = search_limiter
         self.reply_limiter = reply_limiter
+        self._token_lock = threading.Lock()
         self.session = requests.Session()
         self.session.headers.update({"Authorization": f"Bearer {access_token}"})
+
+    def update_token(self, new_token: str):
+        """Atomically update access token and session header."""
+        with self._token_lock:
+            self.access_token = new_token
+            self.session.headers["Authorization"] = f"Bearer {new_token}"
 
     def check_connection(self) -> tuple[bool, str]:
         try:

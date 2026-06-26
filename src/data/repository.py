@@ -206,6 +206,12 @@ class Repository:
         ).fetchone()
         return row[0]
 
+    def count_pending_replies(self) -> int:
+        row = self.db.execute(
+            "SELECT COUNT(*) FROM reply_log WHERE status = 'pending'",
+        ).fetchone()
+        return row[0]
+
     def get_reply_stats(
         self,
         period: str = "day",

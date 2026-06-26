@@ -1,7 +1,11 @@
 """Reply records frame — browse and manage sent replies."""
 
+import threading
 import webbrowser
 import customtkinter as ctk
+
+from src.gui.widgets.expandable_text import ExpandableText
+from src.gui.widgets.toast import show_toast
 
 try:
     from CTkMessagebox import CTkMessagebox
@@ -18,6 +22,12 @@ class RepliesFrame(ctk.CTkFrame):
     _STATUS_ZH = {
         "pending": "待送出", "sent": "已送出",
         "failed": "失敗", "retrying": "重試中",
+    }
+    _STATUS_COLORS = {
+        "pending": ("#FF9800", "#FFA726"),
+        "sent": ("#4CAF50", "#66BB6A"),
+        "failed": ("#F44336", "#EF5350"),
+        "retrying": ("#FF9800", "#FFA726"),
     }
 
     def __init__(self, parent, app):
@@ -109,13 +119,21 @@ class RepliesFrame(ctk.CTkFrame):
 
         if not self._all_replies:
             self._count_label.configure(text=f"共 {self._total_count} 筆")
-            empty = ctk.CTkLabel(
-                self._scroll_frame,
-                text="尚無回覆紀錄",
+            empty_frame = ctk.CTkFrame(self._scroll_frame, fg_color="transparent")
+            empty_frame.grid(row=0, column=0, pady=40)
+            ctk.CTkLabel(
+                empty_frame,
+                text="尚無回覆紀錄\n\n系統回覆貼文後，紀錄會出現在這裡\n你可以搜尋、篩選，並從平台刪除回覆",
                 text_color="gray50", font=ctk.CTkFont(size=14),
-            )
-            empty.grid(row=0, column=0, pady=40)
-            self._reply_widgets.append(empty)
+                justify="center",
+            ).pack(pady=(0, 12))
+            ctk.CTkButton(
+                empty_frame, text="前往審核佇列",
+                width=140, height=32,
+                fg_color="transparent", border_width=1,
+                command=lambda: self.app._show_frame("review"),
+            ).pack()
+            self._reply_widgets.append(empty_frame)
             return
 
         self._load_page(self._all_replies)
@@ -200,10 +218,11 @@ class RepliesFrame(ctk.CTkFrame):
             ).pack(side="right")
         else:
             status = reply.get("status", "")
+            status_color = self._STATUS_COLORS.get(status, ("gray50", "gray60"))
             ctk.CTkLabel(
                 header, text=self._STATUS_ZH.get(status, status),
                 font=ctk.CTkFont(size=10, weight="bold"),
-                text_color=("#4CAF50", "#66BB6A") if status == "sent" else ("gray50", "gray60"),
+                text_color=status_color,
             ).pack(side="right")
 
         # Template info
@@ -216,26 +235,20 @@ class RepliesFrame(ctk.CTkFrame):
                 font=ctk.CTkFont(size=10), text_color=("#2196F3", "#64B5F6"),
             ).pack(side="right", padx=10)
 
-        # Row 1: original post preview
+        # Row 1: original post preview (expandable)
         post_content = reply.get("post_content", "")
         if post_content:
-            preview = post_content[:120]
-            if len(post_content) > 120:
-                preview += "..."
-            ctk.CTkLabel(
-                card, text=f"原文: {preview}", wraplength=700, justify="left",
-                font=ctk.CTkFont(size=11), text_color="gray50",
-            ).grid(row=1, column=0, sticky="w", padx=10, pady=(2, 0))
+            ExpandableText(
+                card, text=post_content, prefix="原文: ", max_preview=100,
+                wraplength=700, font=ctk.CTkFont(size=11), text_color="gray50",
+            ).grid(row=1, column=0, sticky="ew", padx=10, pady=(2, 0))
 
-        # Row 2: reply content
+        # Row 2: reply content (expandable)
         reply_content = reply.get("reply_content", "")
-        reply_preview = reply_content[:200]
-        if len(reply_content) > 200:
-            reply_preview += "..."
-        ctk.CTkLabel(
-            card, text=f"回覆: {reply_preview}", wraplength=700, justify="left",
-            font=ctk.CTkFont(size=12),
-        ).grid(row=2, column=0, sticky="w", padx=10, pady=(2, 4))
+        ExpandableText(
+            card, text=reply_content, prefix="回覆: ", max_preview=100,
+            wraplength=700, font=ctk.CTkFont(size=12),
+        ).grid(row=2, column=0, sticky="ew", padx=10, pady=(2, 4))
 
         # Row 3: actions
         footer = ctk.CTkFrame(card, fg_color="transparent")
@@ -276,29 +289,30 @@ class RepliesFrame(ctk.CTkFrame):
 
         adapter = self.app.reply_engine.adapters.get(platform)
         if not adapter:
-            if CTkMessagebox:
-                CTkMessagebox(
-                    title="錯誤",
-                    message=f"{platform.capitalize()} 未連線，無法刪除",
-                    icon="cancel",
-                )
+            show_toast(self, f"{platform.capitalize()} 未連線，無法刪除", "error", duration_ms=3000)
             return
 
-        try:
-            success, error = adapter.delete_reply(platform_reply_id)
-        except Exception as e:
-            success, error = False, str(e)
+        show_toast(self, "刪除中...", "info", duration_ms=10000)
 
-        if success:
-            self.app.repo.mark_reply_deleted(reply_id)
-            self.app.repo.log_audit("REPLY_DELETED", {
-                "reply_id": reply_id,
-                "platform": platform,
-                "platform_reply_id": platform_reply_id,
-            })
-            if CTkMessagebox:
-                CTkMessagebox(title="已刪除", message="回覆已從平台刪除", icon="check")
-            self.refresh()
-        else:
-            if CTkMessagebox:
-                CTkMessagebox(title="刪除失敗", message=error, icon="cancel")
+        def _worker():
+            try:
+                success, error = adapter.delete_reply(platform_reply_id)
+            except Exception as e:
+                success, error = False, str(e)
+
+            def _finish():
+                if success:
+                    self.app.repo.mark_reply_deleted(reply_id)
+                    self.app.repo.log_audit("REPLY_DELETED", {
+                        "reply_id": reply_id,
+                        "platform": platform,
+                        "platform_reply_id": platform_reply_id,
+                    })
+                    show_toast(self, "回覆已從平台刪除", "success")
+                    self.refresh()
+                else:
+                    show_toast(self, f"刪除失敗: {error[:60]}", "error", duration_ms=4000)
+
+            self.app.run_in_gui(_finish)
+
+        threading.Thread(target=_worker, daemon=True).start()

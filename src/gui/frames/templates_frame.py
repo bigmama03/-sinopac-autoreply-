@@ -1,9 +1,10 @@
 """Template management frame — import, view, delete."""
 
 import csv
-import os
 import customtkinter as ctk
 from tkinter import filedialog
+
+from src.gui.widgets.toast import show_toast
 
 try:
     from CTkMessagebox import CTkMessagebox
@@ -148,17 +149,27 @@ class TemplatesFrame(ctk.CTkFrame):
 
         imported, skipped, error = self.app.template_manager.import_from_file(file_path)
         if error:
-            self._show_message("匯入失敗", error, "cancel")
+            show_toast(self, f"匯入失敗: {error[:60]}", "error", duration_ms=4000)
         else:
             msg = f"成功匯入 {imported} 則文案"
             if skipped > 0:
-                msg += f"\n跳過 {skipped} 則重複文案"
-            self._show_message("匯入完成", msg, "check")
+                msg += f"，跳過 {skipped} 則重複"
+            show_toast(self, msg, "success")
 
         self.refresh()
 
     def _delete_template(self, template_id: int):
+        if CTkMessagebox:
+            msg = CTkMessagebox(
+                title="確認刪除",
+                message="確定要刪除這則文案嗎？",
+                icon="warning",
+                option_1="取消", option_2="刪除",
+            )
+            if msg.get() != "刪除":
+                return
         self.app.template_manager.delete(template_id)
+        show_toast(self, "文案已刪除", "success")
         self.refresh()
 
     def _clear_all(self):
@@ -175,6 +186,7 @@ class TemplatesFrame(ctk.CTkFrame):
             if msg.get() != "確定清除":
                 return
         self.app.template_manager.clear_all()
+        show_toast(self, "全部文案已清除", "success")
         self.refresh()
 
     def _show_message(self, title: str, message: str, icon: str = "info"):

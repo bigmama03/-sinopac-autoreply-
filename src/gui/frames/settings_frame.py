@@ -1,7 +1,11 @@
-"""Settings frame — API credentials, mode toggle, safety parameters."""
+"""Settings frame — browser login, mode toggle, and safety parameters."""
 
+import logging
+import threading
 import customtkinter as ctk
-from src.utils.crypto import encrypt_token, decrypt_token
+from src.gui.widgets.toast import show_toast
+
+logger = logging.getLogger(__name__)
 
 try:
     from CTkMessagebox import CTkMessagebox
@@ -24,7 +28,8 @@ class SettingsFrame(ctk.CTkFrame):
 
         self._scroll = scroll
         self._entries: dict[str, ctk.CTkEntry | ctk.CTkSwitch | ctk.CTkOptionMenu] = {}
-        self._decrypt_failed: set = set()
+        self._browser_status_labels: dict[str, ctk.CTkLabel] = {}
+        self._browser_test_labels: dict[str, ctk.CTkLabel] = {}
         row = 0
 
         # ── Mode Toggle ──
@@ -40,17 +45,62 @@ class SettingsFrame(ctk.CTkFrame):
         self._mode_switch.pack(side="left", padx=10)
         row += 1
 
-        # ── Threads API ──
-        row = self._add_section_title(scroll, "Threads API 設定", row)
-        row = self._add_entry(scroll, "threads_user_id", "Threads User ID", row)
-        row = self._add_entry(scroll, "threads_access_token", "Access Token", row, show="*")
+        # ── Browser Settings ──
+        for platform, title in (
+            ("threads", "Threads 瀏覽器設定"),
+            ("facebook", "Facebook 瀏覽器設定"),
+            ("instagram", "Instagram 瀏覽器設定"),
+        ):
+            row = self._add_section_title(scroll, title, row)
 
-        # ── Facebook API ──
-        row = self._add_section_title(scroll, "Facebook API 設定", row)
-        row = self._add_entry(scroll, "fb_app_id", "App ID", row)
-        row = self._add_entry(scroll, "fb_app_secret", "App Secret", row, show="*")
-        row = self._add_entry(scroll, "fb_page_id", "Page ID", row)
-        row = self._add_entry(scroll, "fb_access_token", "Page Access Token", row, show="*")
+            platform_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+            platform_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
+
+            status_label = ctk.CTkLabel(
+                platform_frame, text="未登入", text_color=("gray50", "gray60"),
+            )
+            status_label.pack(side="left", padx=(0, 15))
+            self._browser_status_labels[platform] = status_label
+
+            login_btn = ctk.CTkButton(
+                platform_frame,
+                text="登入瀏覽器",
+                width=100,
+                height=28,
+                command=lambda p=platform: self._browser_login(p),
+            )
+            login_btn.pack(side="left", padx=(0, 8))
+
+            ctk.CTkButton(
+                platform_frame,
+                text="登出",
+                width=60,
+                height=28,
+                fg_color="transparent",
+                border_width=1,
+                command=lambda p=platform: self._browser_logout(p),
+            ).pack(side="left", padx=(0, 8))
+
+            ctk.CTkButton(
+                platform_frame,
+                text="測試連線",
+                width=80,
+                height=28,
+                fg_color="transparent",
+                border_width=1,
+                command=lambda p=platform: self._test_browser_connection(p),
+            ).pack(side="left", padx=(0, 8))
+
+            test_status = ctk.CTkLabel(
+                platform_frame,
+                text="",
+                text_color="gray50",
+                font=ctk.CTkFont(size=11),
+            )
+            test_status.pack(side="left", padx=5)
+            self._browser_test_labels[platform] = test_status
+
+            row += 1
 
         # ── Facebook Monitor Targets ──
         row = self._add_section_title(scroll, "Facebook 監控社團 / 粉專", row)
@@ -129,11 +179,6 @@ class SettingsFrame(ctk.CTkFrame):
         self._ollama_status_label.pack(side="left", padx=10)
         row += 1
 
-        # ── Instagram API ──
-        row = self._add_section_title(scroll, "Instagram API 設定", row)
-        row = self._add_entry(scroll, "ig_user_id", "IG Business Account ID", row)
-        row = self._add_entry(scroll, "ig_access_token", "Access Token", row, show="*")
-
         # ── Safety Parameters ──
         row = self._add_section_title(scroll, "安全防護設定", row)
         row = self._add_entry(scroll, "daily_limit_threads", "Threads 每日上限", row, default="40")
@@ -141,8 +186,8 @@ class SettingsFrame(ctk.CTkFrame):
         row = self._add_entry(scroll, "daily_limit_instagram", "Instagram 每日上限", row, default="25")
         row = self._add_entry(scroll, "reply_interval_min_sec", "回覆間隔最小 (秒)", row, default="120")
         row = self._add_entry(scroll, "reply_interval_max_sec", "回覆間隔最大 (秒)", row, default="300")
-        row = self._add_entry(scroll, "business_hours_start", "營業時間起始", row, default="09:00")
-        row = self._add_entry(scroll, "business_hours_end", "營業時間結束", row, default="18:00")
+        row = self._add_entry(scroll, "business_hours_start", "營業時間起始 (HH:MM)", row, default="09:00")
+        row = self._add_entry(scroll, "business_hours_end", "營業時間結束 (HH:MM)", row, default="18:00")
 
         # Save button
         ctk.CTkButton(
@@ -156,6 +201,113 @@ class SettingsFrame(ctk.CTkFrame):
             font=ctk.CTkFont(size=16, weight="bold"),
         ).grid(row=row, column=0, sticky="w", padx=10, pady=(15, 5))
         return row + 1
+
+    def _browser_login(self, platform: str):
+        urls = {
+            "threads": "https://www.threads.net/login",
+            "facebook": "https://www.facebook.com/login",
+            "instagram": "https://www.instagram.com/accounts/login/",
+        }
+        url = urls.get(platform, "")
+        if not url:
+            return
+        status_label = self._browser_status_labels.get(platform)
+        if status_label:
+            status_label.configure(
+                text="登入中... 請在彈出的瀏覽器中完成登入",
+                text_color=("#FF9800", "#FFA726"),
+            )
+
+        def _worker():
+            try:
+                if self.app._shutting_down:
+                    return
+                # login_interactive uses a separate headed browser internally
+                bm = self.app.browser_manager
+                success = bm.login_interactive(platform, url)
+
+                def _finish():
+                    if success:
+                        self._update_browser_status(platform)
+                        show_toast(self, f"{platform.capitalize()} 登入成功", "success")
+                        self.app.repo.update_platform_config(platform, is_enabled=1)
+                    else:
+                        if status_label:
+                            status_label.configure(
+                                text="登入失敗或逾時",
+                                text_color=("#F44336", "#EF5350"),
+                            )
+                        show_toast(self, f"{platform.capitalize()} 登入失敗", "error")
+
+                self.app.run_in_gui(_finish)
+            except Exception as e:
+                def _error(err=str(e)):
+                    if status_label:
+                        status_label.configure(
+                            text=f"錯誤: {err[:40]}",
+                            text_color=("#F44336", "#EF5350"),
+                        )
+
+                self.app.run_in_gui(_error)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _browser_logout(self, platform: str):
+        bm = self.app.browser_manager
+        bm.close_context(platform)
+        bm.delete_session(platform)
+        self.app.repo.update_platform_config(platform, is_enabled=0)
+        self._update_browser_status(platform)
+        show_toast(self, f"{platform.capitalize()} 已登出", "success")
+
+    def _test_browser_connection(self, platform: str):
+        test_label = self._browser_test_labels.get(platform)
+        if test_label:
+            test_label.configure(text="測試中...", text_color=("#FF9800", "#FFA726"))
+
+        def _worker():
+            try:
+                if self.app._shutting_down:
+                    return
+                bm = self.app.browser_manager
+                if platform == "threads":
+                    from src.platforms.threads_browser import ThreadsBrowserAdapter
+                    adapter = ThreadsBrowserAdapter(bm)
+                elif platform == "facebook":
+                    from src.platforms.facebook_browser import FacebookBrowserAdapter
+                    adapter = FacebookBrowserAdapter(bm)
+                elif platform == "instagram":
+                    from src.platforms.instagram_browser import InstagramBrowserAdapter
+                    adapter = InstagramBrowserAdapter(bm)
+                else:
+                    return
+                success, message = adapter.check_connection()
+
+                def _finish():
+                    if test_label:
+                        color = ("#4CAF50", "#66BB6A") if success else ("#F44336", "#EF5350")
+                        test_label.configure(text=message, text_color=color)
+
+                self.app.run_in_gui(_finish)
+            except Exception as e:
+                self.app.run_in_gui(
+                    lambda err=str(e): test_label.configure(
+                        text=f"錯誤: {err[:40]}",
+                        text_color=("#F44336", "#EF5350"),
+                    ) if test_label else None
+                )
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _update_browser_status(self, platform: str):
+        bm = self.app.browser_manager
+        has_session = bm.has_session(platform)
+        label = self._browser_status_labels.get(platform)
+        if label:
+            if has_session:
+                label.configure(text="● 已登入", text_color=("#4CAF50", "#66BB6A"))
+            else:
+                label.configure(text="○ 未登入", text_color=("gray50", "gray60"))
 
     def _add_entry(self, parent, key: str, label: str, row: int,
                    show: str = "", default: str = "") -> int:
@@ -176,28 +328,6 @@ class SettingsFrame(ctk.CTkFrame):
         mode = repo.get_setting("reply_mode", "semi_auto")
         self._mode_switch_var.set("1" if mode == "full_auto" else "0")
 
-        self._decrypt_failed.clear()
-
-        # Threads
-        t_config = repo.get_platform_config("threads")
-        if t_config:
-            self._set_entry("threads_user_id", t_config.threads_user_id or "")
-            self._set_entry("threads_access_token", self._safe_decrypt(t_config.access_token, "threads_access_token"))
-
-        # Facebook
-        fb_config = repo.get_platform_config("facebook")
-        if fb_config:
-            self._set_entry("fb_app_id", fb_config.app_id or "")
-            self._set_entry("fb_app_secret", self._safe_decrypt(fb_config.app_secret, "fb_app_secret"))
-            self._set_entry("fb_page_id", fb_config.page_id or "")
-            self._set_entry("fb_access_token", self._safe_decrypt(fb_config.access_token, "fb_access_token"))
-
-        # Instagram
-        ig_config = repo.get_platform_config("instagram")
-        if ig_config:
-            self._set_entry("ig_user_id", ig_config.ig_user_id or "")
-            self._set_entry("ig_access_token", self._safe_decrypt(ig_config.access_token, "ig_access_token"))
-
         # Ollama settings
         ollama_enabled = repo.get_setting("ollama_enabled", "0")
         self._ollama_switch_var.set(ollama_enabled)
@@ -214,6 +344,8 @@ class SettingsFrame(ctk.CTkFrame):
             if val:
                 self._set_entry(key, val)
         self._refresh_fb_targets()
+        for platform in ("threads", "facebook", "instagram"):
+            self._update_browser_status(platform)
 
     def _set_entry(self, key: str, value: str):
         entry = self._entries.get(key)
@@ -226,83 +358,71 @@ class SettingsFrame(ctk.CTkFrame):
         entry = self._entries.get(key)
         return entry.get().strip() if entry else ""
 
-    def _safe_decrypt(self, value: str | None, field_key: str = "") -> str:
-        if not value:
-            return ""
-        try:
-            return decrypt_token(value)
-        except ValueError:
-            if field_key:
-                self._decrypt_failed.add(field_key)
-            return ""
-
     def _save_settings(self):
         try:
             self._do_save()
         except Exception as e:
+            logger.error("Settings save failed: %s", e)
             if CTkMessagebox:
                 CTkMessagebox(title="儲存失敗", message=f"設定儲存時發生錯誤:\n{e}", icon="cancel")
 
     def _test_ollama_connection(self):
         url = self._get_entry("ollama_url") or "http://localhost:11434"
         model = self._get_entry("ollama_model") or "llama3.2"
+        self._ollama_status_label.configure(text="連線中...", text_color=("#FF9800", "#FFA726"))
 
-        from src.core.ollama_judge import OllamaJudge
-        judge = OllamaJudge(url=url, model=model)
-        success, message = judge.check_connection()
+        def _test():
+            from src.core.ollama_judge import OllamaJudge
+            judge = OllamaJudge(url=url, model=model)
+            success, message = judge.check_connection()
+            if success:
+                self.app.run_in_gui(lambda: self._ollama_status_label.configure(
+                    text=message, text_color=("#4CAF50", "#66BB6A"),
+                ))
+            else:
+                self.app.run_in_gui(lambda m=message: self._ollama_status_label.configure(
+                    text=m, text_color=("red", "#EF5350"),
+                ))
 
-        if success:
-            self._ollama_status_label.configure(text=message, text_color=("#4CAF50", "#66BB6A"))
-        else:
-            self._ollama_status_label.configure(text=message, text_color=("red", "#EF5350"))
+        threading.Thread(target=_test, daemon=True).start()
 
     def _do_save(self):
         repo = self.app.repo
 
+        # Validate all fields BEFORE committing any DB writes
+        numeric_keys = (
+            "daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
+            "reply_interval_min_sec", "reply_interval_max_sec",
+        )
+        numeric_labels = {
+            "daily_limit_threads": "Threads 每日上限",
+            "daily_limit_facebook": "Facebook 每日上限",
+            "daily_limit_instagram": "Instagram 每日上限",
+            "reply_interval_min_sec": "回覆間隔最小",
+            "reply_interval_max_sec": "回覆間隔最大",
+        }
+        for key in numeric_keys:
+            val = self._get_entry(key)
+            if val and (not val.isdigit() or int(val) < 0):
+                show_toast(self, f"「{numeric_labels.get(key, key)}」必須為正整數", "error", duration_ms=3000)
+                return
+
+        for key in ("business_hours_start", "business_hours_end"):
+            val = self._get_entry(key)
+            if val:
+                label = "營業時間起始" if key == "business_hours_start" else "營業時間結束"
+                try:
+                    from datetime import datetime as _dt
+                    _dt.strptime(val, "%H:%M")
+                except ValueError:
+                    show_toast(self, f"「{label}」格式錯誤，請用 HH:MM（如 09:00）", "error", duration_ms=3000)
+                    return
+
+        # All validation passed — now commit to DB
+
         # Mode
         mode = "full_auto" if self._mode_switch_var.get() == "1" else "semi_auto"
         repo.set_setting("reply_mode", mode)
-
-        # Threads — skip token update if field is empty AND decryption had failed
-        threads_token = self._get_entry("threads_access_token")
-        threads_update = {"threads_user_id": self._get_entry("threads_user_id")}
-        if threads_token:
-            threads_update["access_token"] = encrypt_token(threads_token)
-            threads_update["is_enabled"] = 1
-        elif "threads_access_token" not in self._decrypt_failed:
-            threads_update["access_token"] = ""
-            threads_update["is_enabled"] = 0
-        repo.update_platform_config("threads", **threads_update)
-
-        # Facebook
-        fb_token = self._get_entry("fb_access_token")
-        fb_secret = self._get_entry("fb_app_secret")
-        fb_update = {
-            "app_id": self._get_entry("fb_app_id"),
-            "page_id": self._get_entry("fb_page_id"),
-        }
-        if fb_secret:
-            fb_update["app_secret"] = encrypt_token(fb_secret)
-        elif "fb_app_secret" not in self._decrypt_failed:
-            fb_update["app_secret"] = ""
-        if fb_token:
-            fb_update["access_token"] = encrypt_token(fb_token)
-            fb_update["is_enabled"] = 1
-        elif "fb_access_token" not in self._decrypt_failed:
-            fb_update["access_token"] = ""
-            fb_update["is_enabled"] = 0
-        repo.update_platform_config("facebook", **fb_update)
-
-        # Instagram
-        ig_token = self._get_entry("ig_access_token")
-        ig_update = {"ig_user_id": self._get_entry("ig_user_id")}
-        if ig_token:
-            ig_update["access_token"] = encrypt_token(ig_token)
-            ig_update["is_enabled"] = 1
-        elif "ig_access_token" not in self._decrypt_failed:
-            ig_update["access_token"] = ""
-            ig_update["is_enabled"] = 0
-        repo.update_platform_config("instagram", **ig_update)
 
         # Ollama settings
         ollama_enabled = self._ollama_switch_var.get()
@@ -312,21 +432,21 @@ class SettingsFrame(ctk.CTkFrame):
             val = self._get_entry(key) or default
             repo.set_setting(key, val)
 
-        # Safety settings
-        for key in ("daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
-                     "reply_interval_min_sec", "reply_interval_max_sec",
-                     "business_hours_start", "business_hours_end"):
+        # Safety settings (already validated above)
+        for key in numeric_keys:
+            val = self._get_entry(key)
+            if val:
+                repo.set_setting(key, val)
+
+        for key in ("business_hours_start", "business_hours_end"):
             val = self._get_entry(key)
             if val:
                 repo.set_setting(key, val)
 
         self.app.reload_ollama_judge()
         repo.log_audit("SETTINGS_SAVED", {"mode": mode})
-        self._decrypt_failed.clear()
-        self._ollama_status_label.configure(text="設定已套用", text_color=("#4CAF50", "#66BB6A"))
 
-        if CTkMessagebox:
-            CTkMessagebox(title="儲存成功", message="設定已儲存", icon="check")
+        show_toast(self, "設定已儲存", "success")
 
     def _add_fb_target(self):
         target_id = self._fb_target_id_entry.get().strip()

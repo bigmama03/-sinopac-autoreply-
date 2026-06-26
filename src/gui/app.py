@@ -13,6 +13,7 @@ from src.core.compliance import ComplianceGate
 from src.core.ollama_judge import OllamaJudge
 from src.core.scheduler import PatrolScheduler
 from src.platforms.rate_limiter import PlatformRateLimiters
+from src.platforms.browser_manager import BrowserManager
 from config import APP_NAME_ZH, APP_VERSION, NEGATIVE_KEYWORDS
 
 logger = logging.getLogger(__name__)
@@ -45,24 +46,33 @@ class App(ctk.CTk):
             ollama_judge=self.ollama_judge,
         )
         self.rate_limiters = PlatformRateLimiters()
+        self.browser_manager = BrowserManager(headless=True)
         self.scheduler = PatrolScheduler(
             self.repo, self.reply_engine, self.rate_limiters,
+            browser_manager=self.browser_manager,
             on_new_posts=lambda count: self.run_in_gui(
                 lambda c=count: self._on_new_posts(c)
             ),
             on_shadowban=lambda plat, cnt: self.run_in_gui(
                 lambda p=plat, c=cnt: self._on_shadowban(p, c)
             ),
+            on_patrol_log=lambda level, msg: self.run_in_gui(
+                lambda l=level, m=msg: self._on_patrol_log(l, m)
+            ),
         )
 
         # Thread-safe message queue for background → GUI communication
         self.msg_queue: queue.Queue = queue.Queue()
+        self._patrol_log_buffer: list[tuple[str, str]] = []  # buffer before monitor frame exists
+        self._shutting_down = False  # Flag for daemon threads to check
 
         # Window setup
         self.title(f"{APP_NAME_ZH} v{APP_VERSION}")
         self.geometry("1100x700")
         self.minsize(900, 600)
-        ctk.set_appearance_mode("dark")
+        # Restore persisted appearance mode
+        saved_appearance = self.repo.get_setting("appearance_mode", "dark")
+        ctk.set_appearance_mode(saved_appearance)
         ctk.set_default_color_theme("blue")
 
         # Layout: sidebar + content
@@ -75,8 +85,10 @@ class App(ctk.CTk):
         # Show dashboard by default
         self._show_frame("dashboard")
 
-        # Start polling the message queue
+        # Start polling the message queue + badge refresh
         self._poll_queue()
+        self._update_sidebar_badges()
+        self._badge_refresh_loop()
 
     def _build_sidebar(self):
         sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
@@ -103,23 +115,52 @@ class App(ctk.CTk):
         ]
 
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
+        self._nav_badges: dict[str, ctk.CTkLabel] = {}
         for i, (label, name) in enumerate(nav_items):
+            row_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+            row_frame.grid(row=i + 1, column=0, padx=10, pady=2, sticky="ew")
+            row_frame.grid_columnconfigure(0, weight=1)
+
             btn = ctk.CTkButton(
-                sidebar, text=label, height=40,
+                row_frame, text=label, height=40,
                 fg_color="transparent", text_color=("gray10", "gray90"),
                 hover_color=("gray70", "gray30"),
                 anchor="w",
                 command=lambda n=name: self._show_frame(n),
             )
-            btn.grid(row=i + 1, column=0, padx=10, pady=2, sticky="ew")
+            btn.grid(row=0, column=0, sticky="ew")
             self._nav_buttons[name] = btn
+
+            # Badge placeholders for review queue and replies
+            if name in ("review", "replies"):
+                badge_color = "#F44336" if name == "review" else "#FF9800"
+                badge = ctk.CTkLabel(
+                    row_frame, text="", width=28, height=20,
+                    corner_radius=10, font=ctk.CTkFont(size=10, weight="bold"),
+                    fg_color=badge_color, text_color="#FFFFFF",
+                )
+                badge.grid(row=0, column=1, padx=(0, 8))
+                badge.grid_remove()  # Hidden by default
+                self._nav_badges[name] = badge
+
+        # Appearance toggle
+        self._appearance_menu = ctk.CTkOptionMenu(
+            sidebar, values=["Dark", "Light", "System"],
+            width=100, height=28, font=ctk.CTkFont(size=11),
+            command=self._on_appearance_change,
+        )
+        # Restore appearance menu to match saved setting
+        mode_display = {"dark": "Dark", "light": "Light", "system": "System"}
+        saved_mode = self.repo.get_setting("appearance_mode", "dark")
+        self._appearance_menu.set(mode_display.get(saved_mode, "Dark"))
+        self._appearance_menu.grid(row=10, column=0, padx=20, pady=(5, 5))
 
         # Version at bottom
         ver_label = ctk.CTkLabel(
             sidebar, text=f"v{APP_VERSION}",
             font=ctk.CTkFont(size=11), text_color="gray50",
         )
-        ver_label.grid(row=10, column=0, padx=20, pady=(0, 10))
+        ver_label.grid(row=11, column=0, padx=20, pady=(0, 10))
 
     def _build_content_area(self):
         """Create the content container and all page frames."""
@@ -193,14 +234,15 @@ class App(ctk.CTk):
 
     def _poll_queue(self):
         """Process messages from background threads."""
+        if self._shutting_down:
+            return
         try:
             while True:
                 callback = self.msg_queue.get_nowait()
                 try:
                     callback()
                 except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error("GUI callback error: %s", e)
+                    logger.error("GUI callback error: %s", e)
         except queue.Empty:
             pass
         self.after(200, self._poll_queue)
@@ -208,6 +250,42 @@ class App(ctk.CTk):
     def run_in_gui(self, callback):
         """Schedule a callback to run on the GUI thread."""
         self.msg_queue.put(callback)
+
+    def _update_sidebar_badges(self):
+        """Update the pending count badges on review and replies nav items."""
+        # Review queue badge
+        review_badge = self._nav_badges.get("review")
+        if review_badge:
+            count = self.repo.count_posts_by_status("pending")
+            if count > 0:
+                review_badge.configure(text=str(count) if count < 100 else "99+")
+                review_badge.grid()
+            else:
+                review_badge.grid_remove()
+
+        # Pending replies badge
+        replies_badge = self._nav_badges.get("replies")
+        if replies_badge:
+            pending_replies = self.repo.count_pending_replies()
+            if pending_replies > 0:
+                replies_badge.configure(text=str(pending_replies) if pending_replies < 100 else "99+")
+                replies_badge.grid()
+            else:
+                replies_badge.grid_remove()
+
+    def _badge_refresh_loop(self):
+        """Periodically refresh sidebar badges."""
+        try:
+            self._update_sidebar_badges()
+        except Exception:
+            pass
+        self._badge_after_id = self.after(5000, self._badge_refresh_loop)
+
+    def _on_appearance_change(self, value: str):
+        mode_map = {"Dark": "dark", "Light": "light", "System": "system"}
+        mode = mode_map.get(value, "dark")
+        ctk.set_appearance_mode(mode)
+        self.repo.set_setting("appearance_mode", mode)
 
     def _create_ollama_judge(self) -> OllamaJudge:
         """Build an Ollama judge instance from current repository settings."""
@@ -220,6 +298,17 @@ class App(ctk.CTk):
         self.ollama_judge = self._create_ollama_judge()
         self.reply_engine.ollama_judge = self.ollama_judge
 
+    def _on_patrol_log(self, level: str, message: str):
+        """Forward patrol log to monitor frame, buffering if not yet created."""
+        if "monitor" not in self._frames:
+            self._patrol_log_buffer.append((level, message))
+            if len(self._patrol_log_buffer) > 200:
+                self._patrol_log_buffer = self._patrol_log_buffer[-200:]
+            return
+        frame = self._frames["monitor"]
+        if hasattr(frame, "append_patrol_log"):
+            frame.append_patrol_log(level, message)
+
     def _on_new_posts(self, count: int):
         """Called when new posts are detected by patrol."""
         # Refresh current frame if it's dashboard, monitor, or review
@@ -228,6 +317,8 @@ class App(ctk.CTk):
                 frame = self._frames[name]
                 if hasattr(frame, "refresh"):
                     frame.refresh()
+
+        self._update_sidebar_badges()
 
         # Desktop notification in semi_auto mode
         mode = self.repo.get_setting("reply_mode", "semi_auto")
@@ -265,6 +356,10 @@ class App(ctk.CTk):
             logger.warning("Desktop notification failed: %s", e)
 
     def destroy(self):
+        self._shutting_down = True
+        if hasattr(self, "_badge_after_id"):
+            self.after_cancel(self._badge_after_id)
         self.scheduler.stop()
+        self.browser_manager.close()
         self.db.close()
         super().destroy()

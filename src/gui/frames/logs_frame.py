@@ -1,9 +1,11 @@
 """Audit log viewer frame."""
 
 import csv
-import io
+import json
 import customtkinter as ctk
 from tkinter import filedialog
+
+from src.gui.widgets.toast import show_toast
 
 try:
     from CTkMessagebox import CTkMessagebox
@@ -42,6 +44,13 @@ class LogsFrame(ctk.CTkFrame):
             command=self.refresh,
         ).pack(side="left", padx=5)
 
+        self._clear_filter_btn = ctk.CTkButton(
+            ctrl_frame, text="清除篩選", width=80, height=28,
+            fg_color="transparent", border_width=1,
+            command=self._clear_filter,
+        )
+        self._clear_filter_btn.pack(side="left", padx=5)
+
         ctk.CTkButton(
             ctrl_frame, text="匯出稽核日誌", width=110,
             fg_color="transparent", border_width=1,
@@ -79,6 +88,17 @@ class LogsFrame(ctk.CTkFrame):
         action_filter = self._filter_var.get().strip() or None
         logs = self.app.repo.get_audit_logs(limit=500, action_filter=action_filter)
 
+        if not logs:
+            empty = ctk.CTkLabel(
+                self._scroll_frame,
+                text="尚無稽核日誌\n\n系統操作（啟動海巡、核准回覆、刪除等）都會自動記錄在這裡",
+                text_color="gray50", font=ctk.CTkFont(size=14),
+                justify="center",
+            )
+            empty.grid(row=1, column=0, columnspan=3, pady=40)
+            self._log_widgets.append([empty])
+            return
+
         for i, log in enumerate(logs):
             row_num = i + 1  # Skip header row
             widgets = []
@@ -87,31 +107,71 @@ class LogsFrame(ctk.CTkFrame):
                 self._scroll_frame, text=(log.timestamp or "")[:19],
                 font=ctk.CTkFont(size=11), text_color="gray60",
             )
-            ts_label.grid(row=row_num, column=0, sticky="w", padx=8, pady=1)
+            ts_label.grid(row=row_num, column=0, sticky="nw", padx=8, pady=1)
             widgets.append(ts_label)
 
             action_label = ctk.CTkLabel(
                 self._scroll_frame, text=log.action,
                 font=ctk.CTkFont(size=11, weight="bold"),
             )
-            action_label.grid(row=row_num, column=1, sticky="w", padx=8, pady=1)
+            action_label.grid(row=row_num, column=1, sticky="nw", padx=8, pady=1)
             widgets.append(action_label)
 
-            details_text = (log.details or "")[:100]
+            # Expandable details: show truncated by default, click to expand
+            raw_details = log.details or ""
+            details_preview = self._format_details(raw_details, truncate=True)
+            details_full = self._format_details(raw_details, truncate=False)
+            is_long = len(raw_details) > 80
+
             details_label = ctk.CTkLabel(
-                self._scroll_frame, text=details_text,
+                self._scroll_frame, text=details_preview,
                 font=ctk.CTkFont(size=10), text_color="gray50",
+                wraplength=500, justify="left",
+                cursor="hand2" if is_long else "",
             )
-            details_label.grid(row=row_num, column=2, sticky="w", padx=8, pady=1)
+            details_label.grid(row=row_num, column=2, sticky="nw", padx=8, pady=1)
+            if is_long:
+                details_label._expanded = False
+                details_label.bind("<Button-1>", lambda e, lbl=details_label, short=details_preview, full=details_full: self._toggle_detail(lbl, short, full))
             widgets.append(details_label)
 
             self._log_widgets.append(widgets)
 
+    def _clear_filter(self):
+        self._filter_var.set("")
+        self.refresh()
+
+    @staticmethod
+    def _format_details(raw: str, truncate: bool = True) -> str:
+        """Format JSON details for display."""
+        if not raw:
+            return ""
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                parts = [f"{k}: {v}" for k, v in data.items()]
+                text = ", ".join(parts)
+            else:
+                text = str(data)
+        except (json.JSONDecodeError, TypeError):
+            text = raw
+        if truncate and len(text) > 80:
+            return text[:80] + "..."
+        return text
+
+    @staticmethod
+    def _toggle_detail(label, short_text: str, full_text: str):
+        if label._expanded:
+            label.configure(text=short_text)
+            label._expanded = False
+        else:
+            label.configure(text=full_text)
+            label._expanded = True
+
     def _export_audit_csv(self):
         logs = self.app.repo.get_audit_logs(limit=10000)
         if not logs:
-            if CTkMessagebox:
-                CTkMessagebox(title="匯出", message="沒有稽核日誌可匯出", icon="info")
+            show_toast(self, "沒有稽核日誌可匯出", "info")
             return
 
         file_path = filedialog.asksaveasfilename(
@@ -130,18 +190,15 @@ class LogsFrame(ctk.CTkFrame):
                 for log in logs:
                     writer.writerow([log.id, log.timestamp, log.action, log.details])
         except OSError as e:
-            if CTkMessagebox:
-                CTkMessagebox(title="匯出失敗", message=f"寫入檔案失敗: {e}", icon="cancel")
+            show_toast(self, f"匯出失敗: {e}", "error", duration_ms=4000)
             return
 
-        if CTkMessagebox:
-            CTkMessagebox(title="匯出完成", message=f"已匯出 {len(logs)} 筆稽核日誌\n{file_path}", icon="check")
+        show_toast(self, f"已匯出 {len(logs)} 筆稽核日誌", "success")
 
     def _export_reply_csv(self):
         logs = self.app.repo.get_all_reply_logs(limit=10000)
         if not logs:
-            if CTkMessagebox:
-                CTkMessagebox(title="匯出", message="沒有回覆紀錄可匯出", icon="info")
+            show_toast(self, "沒有回覆紀錄可匯出", "info")
             return
 
         file_path = filedialog.asksaveasfilename(
@@ -172,9 +229,7 @@ class LogsFrame(ctk.CTkFrame):
                         r.get("sent_at", ""), r["created_at"],
                     ])
         except OSError as e:
-            if CTkMessagebox:
-                CTkMessagebox(title="匯出失敗", message=f"寫入檔案失敗: {e}", icon="cancel")
+            show_toast(self, f"匯出失敗: {e}", "error", duration_ms=4000)
             return
 
-        if CTkMessagebox:
-            CTkMessagebox(title="匯出完成", message=f"已匯出 {len(logs)} 筆回覆紀錄\n{file_path}", icon="check")
+        show_toast(self, f"已匯出 {len(logs)} 筆回覆紀錄", "success")
