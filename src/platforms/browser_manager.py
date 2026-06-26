@@ -51,6 +51,7 @@ class BrowserManager:
         self._browser: Optional[Browser] = None
         self._contexts: dict[str, BrowserContext] = {}
         self._lock = threading.RLock()
+        self._browser_tid: Optional[int] = None  # thread that created the browser
 
     def set_headless(self, headless: bool) -> None:
         """Change headless mode. Closes existing browser; next operation uses new mode."""
@@ -64,7 +65,18 @@ class BrowserManager:
         return Path(BROWSER_DATA_DIR) / f"{platform}_session.json"
 
     def _ensure_browser(self) -> None:
-        """Start Playwright browser if not running. Must be called with lock held."""
+        """Start Playwright browser if not running. Must be called with lock held.
+
+        Playwright objects are bound to the thread that created them (greenlet).
+        If called from a different thread, the old browser is torn down and
+        recreated in the current thread.
+        """
+        current_tid = threading.get_ident()
+        if self._browser is not None and self._browser_tid != current_tid:
+            logger.info("Browser created in thread %s but called from %s, recreating",
+                        self._browser_tid, current_tid)
+            self._teardown_browser()
+
         if self._browser is not None:
             return
         self._pw = sync_playwright().start()
@@ -72,7 +84,36 @@ class BrowserManager:
             headless=self._headless,
             args=BROWSER_ARGS,
         )
-        logger.info("Playwright Chromium browser started (headless=%s)", self._headless)
+        self._browser_tid = current_tid
+        logger.info("Playwright Chromium browser started (headless=%s, thread=%s)",
+                    self._headless, current_tid)
+
+    def _teardown_browser(self) -> None:
+        """Close browser and Playwright without acquiring the lock (caller holds it)."""
+        for platform in list(self._contexts):
+            try:
+                self._contexts[platform].storage_state(
+                    path=str(self._session_path(platform)))
+            except Exception:
+                pass
+            try:
+                self._contexts[platform].close()
+            except Exception:
+                pass
+        self._contexts.clear()
+        try:
+            if self._browser:
+                self._browser.close()
+        except Exception:
+            pass
+        try:
+            if self._pw:
+                self._pw.stop()
+        except Exception:
+            pass
+        self._browser = None
+        self._pw = None
+        self._browser_tid = None
 
     def _new_context_kwargs(self, session_path: Optional[Path] = None) -> dict:
         """Build kwargs for browser.new_context()."""
@@ -297,31 +338,5 @@ class BrowserManager:
     def close(self) -> None:
         """Save all sessions and shut down Playwright."""
         with self._lock:
-            for platform in list(self._contexts):
-                try:
-                    self._contexts[platform].storage_state(
-                        path=str(self._session_path(platform))
-                    )
-                except Exception:
-                    pass
-                try:
-                    self._contexts[platform].close()
-                except Exception:
-                    pass
-            self._contexts.clear()
-
-            if self._browser:
-                try:
-                    self._browser.close()
-                except Exception:
-                    pass
-                self._browser = None
-
-            if self._pw:
-                try:
-                    self._pw.stop()
-                except Exception:
-                    pass
-                self._pw = None
-
+            self._teardown_browser()
             logger.info("BrowserManager closed")
