@@ -45,6 +45,19 @@ class SettingsFrame(ctk.CTkFrame):
         self._mode_switch.pack(side="left", padx=10)
         row += 1
 
+        # ── Browser Visible Toggle (debug) ──
+        visible_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        visible_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
+        self._visible_switch_var = ctk.StringVar(value="0")
+        self._visible_switch = ctk.CTkSwitch(
+            visible_frame, text="顯示海巡瀏覽器視窗（除錯用）",
+            variable=self._visible_switch_var,
+            onvalue="1", offvalue="0",
+            command=self._on_browser_visible_change,
+        )
+        self._visible_switch.pack(side="left")
+        row += 1
+
         # ── Browser Settings ──
         for platform, title in (
             ("threads", "Threads 瀏覽器設定"),
@@ -202,6 +215,12 @@ class SettingsFrame(ctk.CTkFrame):
         ).grid(row=row, column=0, sticky="w", padx=10, pady=(15, 5))
         return row + 1
 
+    def _on_browser_visible_change(self):
+        visible = self._visible_switch_var.get() == "1"
+        self.app.repo.set_setting("browser_visible", "1" if visible else "0")
+        self.app.browser_manager.set_headless(not visible)
+        show_toast(self, "海巡瀏覽器將以可見模式執行" if visible else "海巡瀏覽器已切回背景模式", "info")
+
     def _browser_login(self, platform: str):
         urls = {
             "threads": "https://www.threads.com/login",
@@ -327,6 +346,10 @@ class SettingsFrame(ctk.CTkFrame):
         # Mode
         mode = repo.get_setting("reply_mode", "semi_auto")
         self._mode_switch_var.set("1" if mode == "full_auto" else "0")
+
+        # Browser visible
+        browser_visible = repo.get_setting("browser_visible", "0")
+        self._visible_switch_var.set(browser_visible)
 
         # Ollama settings
         ollama_enabled = repo.get_setting("ollama_enabled", "0")

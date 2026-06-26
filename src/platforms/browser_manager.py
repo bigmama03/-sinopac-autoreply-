@@ -52,6 +52,14 @@ class BrowserManager:
         self._contexts: dict[str, BrowserContext] = {}
         self._lock = threading.RLock()
 
+    def set_headless(self, headless: bool) -> None:
+        """Change headless mode. Closes existing browser; next operation uses new mode."""
+        if self._headless == headless:
+            return
+        self._headless = headless
+        self.close()
+        logger.info("Browser headless mode changed to %s", headless)
+
     def _session_path(self, platform: str) -> Path:
         return Path(BROWSER_DATA_DIR) / f"{platform}_session.json"
 

@@ -46,7 +46,8 @@ class App(ctk.CTk):
             ollama_judge=self.ollama_judge,
         )
         self.rate_limiters = PlatformRateLimiters()
-        self.browser_manager = BrowserManager(headless=True)
+        browser_visible = self.repo.get_setting("browser_visible", "0") == "1"
+        self.browser_manager = BrowserManager(headless=not browser_visible)
         self.scheduler = PatrolScheduler(
             self.repo, self.reply_engine, self.rate_limiters,
             browser_manager=self.browser_manager,
