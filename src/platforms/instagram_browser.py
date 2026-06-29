@@ -39,7 +39,10 @@ SIDEBAR_SELECTOR = "section main"
 
 TAG_GRID_ARTICLE_SELECTOR = "article"
 TAG_GRID_LINK_SELECTOR = "article a[href^='/p/']"
+TAG_GRID_LINK_BROAD_SELECTOR = "main a[href^='/p/'], main a[href^='/reel/']"
 TAG_GRID_SECTION_SELECTOR = "main section"
+TAG_GRID_IMG_SELECTOR = "main img[crossorigin]"
+TAG_NO_RESULTS_TEXT = "text=/No posts yet|沒有貼文|No results found/i"
 POST_DIALOG_SELECTOR = "div[role='dialog']"
 POST_ARTICLE_SELECTOR = "main article"
 
@@ -74,7 +77,7 @@ COMMENTS_EXPAND_SELECTORS = (
     COMMENTS_EXPAND_BUTTON_SELECTOR,
 )
 
-SHORTCODE_URL_PATTERN = re.compile(r"/p/([^/?#]+)/")
+SHORTCODE_URL_PATTERN = re.compile(r"/(?:p|reel)/([^/?#]+)(?:/|$)")
 
 MAX_POSTS_PER_KEYWORD = 10
 COMMENT_LOAD_MORE_CLICKS = 5
@@ -147,10 +150,19 @@ class InstagramBrowserAdapter(PlatformAdapter):
                             continue
 
                         self._dismiss_cookie_dialog(page)
+                        self._capture_screenshot(page)
+
+                        # Check for login redirect
+                        if self._is_login_page(page):
+                            logger.error("Instagram session expired during search (url=%s)", page.url[:120])
+                            return []
+
                         if not self._wait_for_media_grid(page):
+                            self._capture_screenshot(page)
                             logger.error("Instagram media grid not found for keyword=%s", keyword)
                             continue
 
+                        self._capture_screenshot(page)
                         post_urls = self._collect_recent_post_urls(page, MAX_POSTS_PER_KEYWORD)
                         logger.debug("Collected %s Instagram posts for keyword=%s", len(post_urls), keyword)
 
@@ -259,6 +271,13 @@ class InstagramBrowserAdapter(PlatformAdapter):
 
     def _sleep(self, min_seconds: float, max_seconds: float) -> None:
         time.sleep(random.uniform(min_seconds, max_seconds))
+
+    def _capture_screenshot(self, page: Page) -> None:
+        """Take a screenshot and store it in BrowserManager for PIP preview."""
+        try:
+            self._bm.set_screenshot(page.screenshot(type="jpeg", quality=60))
+        except Exception:
+            pass
 
     def _safe_goto(
         self,
@@ -375,38 +394,63 @@ class InstagramBrowserAdapter(PlatformAdapter):
         return username.strip().lstrip("@")
 
     def _wait_for_media_grid(self, page: Page) -> bool:
+        # Try multiple selectors — Instagram DOM changes frequently
+        for selector, label in (
+            (TAG_GRID_ARTICLE_SELECTOR, "article"),
+            (TAG_GRID_LINK_BROAD_SELECTOR, "post/reel links"),
+            (TAG_GRID_IMG_SELECTOR, "grid images"),
+        ):
+            try:
+                page.wait_for_selector(selector, timeout=5000)
+                logger.debug("Instagram grid detected via %s", label)
+                return True
+            except PlaywrightTimeoutError:
+                continue
+            except Exception:
+                continue
+
+        # Check for "no posts" message
         try:
-            page.wait_for_selector(TAG_GRID_ARTICLE_SELECTOR, timeout=10000)
-            return True
-        except PlaywrightTimeoutError:
-            logger.error("Timed out waiting for Instagram article grid")
+            if page.locator(TAG_NO_RESULTS_TEXT).count() > 0:
+                logger.info("Instagram tag page has no posts")
+                return False
         except Exception:
-            logger.error("Failed waiting for Instagram article grid", exc_info=True)
+            pass
 
         try:
             page.wait_for_selector(TAG_GRID_SECTION_SELECTOR, timeout=5000)
+            logger.debug("Instagram grid fallback matched main section")
             return True
-        except PlaywrightTimeoutError:
-            logger.error("Timed out waiting for Instagram section grid")
-            return False
         except Exception:
-            logger.error("Failed waiting for Instagram section grid", exc_info=True)
-            return False
+            pass
+
+        # Log diagnostic info for debugging
+        try:
+            body_text = page.locator("body").inner_text(timeout=3000)[:300]
+            logger.warning(
+                "Instagram media grid not found (url=%s, body_preview=%s)",
+                page.url[:120], body_text[:200],
+            )
+        except Exception:
+            logger.warning("Instagram media grid not found (url=%s)", page.url[:120])
+        return False
 
     def _collect_recent_post_urls(self, page: Page, limit: int) -> list[str]:
         script = """
-        ({ linkSelector, limit }) => {
-            const links = Array.from(document.querySelectorAll(linkSelector));
+        ({ selectors, limit }) => {
             const results = [];
             const seen = new Set();
 
-            for (const link of links) {
-                const href = link.getAttribute('href') || '';
-                if (!href.startsWith('/p/')) continue;
-                if (seen.has(href)) continue;
-                seen.add(href);
-                results.push(new URL(href, window.location.origin).toString());
-                if (results.length >= limit) break;
+            for (const selector of selectors) {
+                const links = Array.from(document.querySelectorAll(selector));
+                for (const link of links) {
+                    const href = link.getAttribute('href') || '';
+                    if (!href.startsWith('/p/') && !href.startsWith('/reel/')) continue;
+                    if (seen.has(href)) continue;
+                    seen.add(href);
+                    results.push(new URL(href, window.location.origin).toString());
+                    if (results.length >= limit) return results;
+                }
             }
             return results;
         }
@@ -414,7 +458,10 @@ class InstagramBrowserAdapter(PlatformAdapter):
         try:
             result = page.evaluate(
                 script,
-                {"linkSelector": TAG_GRID_LINK_SELECTOR, "limit": limit},
+                {
+                    "selectors": [TAG_GRID_LINK_SELECTOR, TAG_GRID_LINK_BROAD_SELECTOR],
+                    "limit": limit,
+                },
             )
         except Exception:
             logger.error("Failed collecting Instagram post URLs from tag grid", exc_info=True)
@@ -422,7 +469,9 @@ class InstagramBrowserAdapter(PlatformAdapter):
 
         if not isinstance(result, list):
             return []
-        return [item for item in result if isinstance(item, str)]
+        urls = [item for item in result if isinstance(item, str)]
+        logger.debug("Collected %d Instagram post URLs", len(urls))
+        return urls
 
     def _extract_post_data(self, page: Page, post_url: str, keyword: str) -> Optional[dict]:
         if not self._safe_goto(page, post_url):
