@@ -158,7 +158,7 @@ class PatrolScheduler:
             try:
                 if plat == 'threads':
                     from src.platforms.threads_browser import ThreadsBrowserAdapter
-                    self.reply_engine.register_adapter(plat, ThreadsBrowserAdapter(self._browser_manager))
+                    self.reply_engine.register_adapter(plat, ThreadsBrowserAdapter(self._browser_manager, repo=self.repo))
                 elif plat == 'facebook':
                     from src.platforms.facebook_browser import FacebookBrowserAdapter
                     self.reply_engine.register_adapter(plat, FacebookBrowserAdapter(self._browser_manager))

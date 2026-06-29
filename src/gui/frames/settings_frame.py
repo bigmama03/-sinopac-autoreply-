@@ -201,6 +201,7 @@ class SettingsFrame(ctk.CTkFrame):
         row = self._add_entry(scroll, "reply_interval_max_sec", "回覆間隔最大 (秒)", row, default="300")
         row = self._add_entry(scroll, "business_hours_start", "營業時間起始 (HH:MM)", row, default="09:00")
         row = self._add_entry(scroll, "business_hours_end", "營業時間結束 (HH:MM)", row, default="18:00")
+        row = self._add_entry(scroll, "search_scroll_count", "搜尋滾動次數 (越多抓越多貼文)", row, default="6")
 
         # Save button
         ctk.CTkButton(
@@ -360,10 +361,13 @@ class SettingsFrame(ctk.CTkFrame):
         self._ollama_status_label.configure(text="", text_color="gray50")
 
         # Safety settings
+        from config import DEFAULT_SETTINGS
         for key in ("daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
                      "reply_interval_min_sec", "reply_interval_max_sec",
-                     "business_hours_start", "business_hours_end"):
-            val = repo.get_setting(key, "")
+                     "business_hours_start", "business_hours_end",
+                     "search_scroll_count"):
+            default = str(DEFAULT_SETTINGS.get(key, ""))
+            val = repo.get_setting(key, default)
             if val:
                 self._set_entry(key, val)
         self._refresh_fb_targets()
@@ -416,6 +420,7 @@ class SettingsFrame(ctk.CTkFrame):
         numeric_keys = (
             "daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
             "reply_interval_min_sec", "reply_interval_max_sec",
+            "search_scroll_count",
         )
         numeric_labels = {
             "daily_limit_threads": "Threads 每日上限",
@@ -423,10 +428,11 @@ class SettingsFrame(ctk.CTkFrame):
             "daily_limit_instagram": "Instagram 每日上限",
             "reply_interval_min_sec": "回覆間隔最小",
             "reply_interval_max_sec": "回覆間隔最大",
+            "search_scroll_count": "搜尋滾動次數",
         }
         for key in numeric_keys:
             val = self._get_entry(key)
-            if val and (not val.isdigit() or int(val) < 0):
+            if val and (not val.isdigit() or int(val) <= 0):
                 show_toast(self, f"「{numeric_labels.get(key, key)}」必須為正整數", "error", duration_ms=3000)
                 return
 

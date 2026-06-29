@@ -57,8 +57,9 @@ logger = logging.getLogger(__name__)
 class ThreadsBrowserAdapter(PlatformAdapter):
     """Browser automation adapter for Threads using Playwright."""
 
-    def __init__(self, browser_manager: BrowserManager):
+    def __init__(self, browser_manager: BrowserManager, repo=None):
         self._bm = browser_manager
+        self._repo = repo
 
     def check_connection(self) -> tuple[bool, str]:
         try:
@@ -144,7 +145,15 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                             except Exception:
                                 logger.warning("Threads search did not load for keyword=%s (url=%s)", kw, page.url[:120])
                         continue
-                    for _ in range(3):
+                    scroll_count = 6
+                    if self._repo is not None:
+                        try:
+                            v = int(self._repo.get_setting("search_scroll_count", "6"))
+                            if v >= 1:
+                                scroll_count = v
+                        except (ValueError, TypeError):
+                            pass
+                    for _ in range(scroll_count):
                         try:
                             page.evaluate("window.scrollBy(0, 800)")
                         except Exception:

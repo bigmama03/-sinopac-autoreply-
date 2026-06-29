@@ -50,6 +50,7 @@ DEFAULT_SETTINGS = {
     "polling_interval_threads_sec": 300,  # 5 minutes
     "polling_interval_facebook_sec": 120, # 2 minutes
     "polling_interval_instagram_sec": 300,
+    "search_scroll_count": 6,
     "relevance_threshold": 3.0,
     "threads_enabled": False,
     "facebook_enabled": False,
