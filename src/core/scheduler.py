@@ -32,6 +32,7 @@ class PatrolScheduler:
 
         self._scheduler: Optional[BackgroundScheduler] = None
         self._running = False
+        self._sending_paused = False
         self._session_id: Optional[int] = None
         self.active_platforms: Optional[list[str]] = None
         self._browser_manager = browser_manager
@@ -39,6 +40,10 @@ class PatrolScheduler:
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def is_sending_paused(self) -> bool:
+        return self._sending_paused
 
     def start(self, platforms: Optional[list[str]] = None):
         if self._running:
@@ -102,6 +107,15 @@ class PatrolScheduler:
         self._scheduler.start()
         self._running = True
 
+        # Restore sending paused state from DB
+        if self.repo.get_setting("sending_paused", "0") == "1":
+            try:
+                self._scheduler.pause_job("send_replies")
+                self._sending_paused = True
+                logger.info("Sending paused (restored from DB)")
+            except Exception as e:
+                logger.warning("Failed to restore sending paused state: %s", e)
+
         self._emit_log("success", f"海巡已啟動，平台: {', '.join(p.capitalize() for p in platforms)}")
         self.repo.log_audit("PATROL_STARTED", {
             "platforms": platforms,
@@ -114,6 +128,8 @@ class PatrolScheduler:
             self._scheduler.shutdown(wait=True)
             self._scheduler = None
             self._running = False
+            self._sending_paused = False
+            self.repo.set_setting("sending_paused", "0")
 
             if self._session_id:
                 self.repo.stop_patrol_session(self._session_id)
@@ -125,6 +141,32 @@ class PatrolScheduler:
             else:
                 self.repo.log_audit("PATROL_STOPPED", {})
                 logger.info("Patrol stopped")
+
+    def pause_sending(self):
+        """Pause the reply sending job."""
+        if self._scheduler and self._running and not self._sending_paused:
+            try:
+                self._scheduler.pause_job("send_replies")
+            except Exception as e:
+                logger.warning("Failed to pause send_replies job: %s", e)
+                return
+            self._sending_paused = True
+            self.repo.set_setting("sending_paused", "1")
+            self.repo.log_audit("SENDING_PAUSED", {})
+            logger.info("Reply sending paused")
+
+    def resume_sending(self):
+        """Resume the reply sending job."""
+        if self._scheduler and self._running and self._sending_paused:
+            try:
+                self._scheduler.resume_job("send_replies")
+            except Exception as e:
+                logger.warning("Failed to resume send_replies job: %s", e)
+                return
+            self._sending_paused = False
+            self.repo.set_setting("sending_paused", "0")
+            self.repo.log_audit("SENDING_RESUMED", {})
+            logger.info("Reply sending resumed")
 
     def _emit_log(self, level: str, message: str):
         """Emit a patrol log message to the GUI callback."""

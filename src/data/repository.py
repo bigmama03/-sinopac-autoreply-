@@ -379,6 +379,7 @@ class Repository:
         self,
         platform: Optional[str] = None,
         search: Optional[str] = None,
+        status: Optional[str] = None,
         show_deleted: bool = False,
         limit: int = 100,
         offset: int = 0,
@@ -396,6 +397,9 @@ class Repository:
         params: list = []
         if not show_deleted:
             sql += " AND r.deleted_at IS NULL"
+        if status:
+            sql += " AND r.status = ?"
+            params.append(status)
         if platform:
             sql += " AND r.platform = ?"
             params.append(platform)
@@ -412,6 +416,7 @@ class Repository:
         self,
         platform: Optional[str] = None,
         search: Optional[str] = None,
+        status: Optional[str] = None,
         show_deleted: bool = False,
     ) -> int:
         sql = """SELECT COUNT(*) FROM reply_log r
@@ -420,6 +425,9 @@ class Repository:
         params: list = []
         if not show_deleted:
             sql += " AND r.deleted_at IS NULL"
+        if status:
+            sql += " AND r.status = ?"
+            params.append(status)
         if platform:
             sql += " AND r.platform = ?"
             params.append(platform)
@@ -429,6 +437,21 @@ class Repository:
             params.extend([like, like, like])
         row = self.db.execute(sql, params).fetchone()
         return row[0]
+
+    def cancel_pending_reply(self, reply_id: int) -> Optional[int]:
+        """Cancel a pending/retrying reply. Returns detected_post_id or None."""
+        row = self.db.execute(
+            "SELECT detected_post_id FROM reply_log WHERE id = ? AND status IN ('pending', 'retrying')",
+            (reply_id,),
+        ).fetchone()
+        if not row:
+            return None
+        self.db.execute(
+            "UPDATE reply_log SET status = 'cancelled' WHERE id = ?",
+            (reply_id,),
+        )
+        self.db.commit()
+        return row["detected_post_id"]
 
     def mark_reply_deleted(self, reply_id: int):
         """Mark a reply as deleted (soft-delete)."""

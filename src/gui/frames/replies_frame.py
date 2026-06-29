@@ -22,12 +22,18 @@ class RepliesFrame(ctk.CTkFrame):
     _STATUS_ZH = {
         "pending": "待送出", "sent": "已送出",
         "failed": "失敗", "retrying": "重試中",
+        "cancelled": "已取消",
     }
     _STATUS_COLORS = {
         "pending": ("#FF9800", "#FFA726"),
         "sent": ("#4CAF50", "#66BB6A"),
         "failed": ("#F44336", "#EF5350"),
         "retrying": ("#FF9800", "#FFA726"),
+        "cancelled": ("gray50", "gray60"),
+    }
+    _STATUS_FILTER_MAP = {
+        "全部": None, "待送出": "pending", "已送出": "sent",
+        "失敗": "failed", "重試中": "retrying", "已取消": "cancelled",
     }
 
     def __init__(self, parent, app):
@@ -37,15 +43,38 @@ class RepliesFrame(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
-        # Title
+        # Title row
+        title_row = ctk.CTkFrame(self, fg_color="transparent")
+        title_row.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+
         ctk.CTkLabel(
-            self, text="回覆紀錄",
+            title_row, text="回覆紀錄",
             font=ctk.CTkFont(size=22, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", pady=(0, 10))
+        ).pack(side="left")
+
+        self._sending_btn = ctk.CTkButton(
+            title_row, text="暫停發送", width=100, height=30,
+            fg_color="#FF9800", hover_color="#F57C00",
+            command=self._toggle_sending,
+        )
+        self._sending_btn.pack(side="right")
+
+        self._pending_count_label = ctk.CTkLabel(
+            title_row, text="", text_color=("#FF9800", "#FFA726"),
+            font=ctk.CTkFont(size=12),
+        )
+        self._pending_count_label.pack(side="right", padx=10)
 
         # Filter row
         filter_row = ctk.CTkFrame(self, fg_color="transparent")
         filter_row.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+
+        ctk.CTkLabel(filter_row, text="狀態:").pack(side="left")
+        self._status_filter = ctk.CTkOptionMenu(
+            filter_row, values=list(self._STATUS_FILTER_MAP.keys()),
+            width=90, command=lambda _: self._apply_filter(),
+        )
+        self._status_filter.pack(side="left", padx=(5, 15))
 
         ctk.CTkLabel(filter_row, text="平台:").pack(side="left")
         self._platform_filter = ctk.CTkOptionMenu(
@@ -98,18 +127,32 @@ class RepliesFrame(ctk.CTkFrame):
         m = {"全部": None, "Threads": "threads", "Facebook": "facebook", "Instagram": "instagram"}
         return m.get(self._platform_filter.get())
 
+    def _get_status_filter(self):
+        return self._STATUS_FILTER_MAP.get(self._status_filter.get())
+
     def _apply_filter(self):
         platform = self._get_platform_filter()
         search = self._search_var.get().strip() or None
+        status = self._get_status_filter()
         show_deleted = self._show_deleted_var.get() == "1"
 
         self._total_count = self.app.repo.count_reply_logs_filtered(
-            platform=platform, search=search, show_deleted=show_deleted,
+            platform=platform, search=search, status=status, show_deleted=show_deleted,
         )
         self._all_replies = self.app.repo.get_reply_logs_filtered(
-            platform=platform, search=search, show_deleted=show_deleted,
+            platform=platform, search=search, status=status, show_deleted=show_deleted,
             limit=self._page_size, offset=0,
         )
+
+        # Update pending count and sending button
+        pending = self.app.repo.count_reply_logs_filtered(status="pending")
+        retrying = self.app.repo.count_reply_logs_filtered(status="retrying")
+        queue_count = pending + retrying
+        if queue_count > 0:
+            self._pending_count_label.configure(text=f"{queue_count} 則待送出")
+        else:
+            self._pending_count_label.configure(text="")
+        self._update_sending_btn()
         self._displayed = 0
 
         # Clear
@@ -167,10 +210,11 @@ class RepliesFrame(ctk.CTkFrame):
     def _load_more(self):
         platform = self._get_platform_filter()
         search = self._search_var.get().strip() or None
+        status = self._get_status_filter()
         show_deleted = self._show_deleted_var.get() == "1"
 
         more = self.app.repo.get_reply_logs_filtered(
-            platform=platform, search=search, show_deleted=show_deleted,
+            platform=platform, search=search, status=status, show_deleted=show_deleted,
             limit=self._page_size, offset=self._displayed,
         )
         if more:
@@ -274,7 +318,67 @@ class RepliesFrame(ctk.CTkFrame):
                 command=lambda rid=reply_id, prid=platform_reply_id, p=plat: self._delete_reply(rid, prid, p),
             ).pack(side="right")
 
+        if not is_deleted and reply.get("status") in ("pending", "retrying"):
+            ctk.CTkButton(
+                footer, text="取消發送", width=70, height=24,
+                font=ctk.CTkFont(size=10),
+                fg_color="transparent", border_width=1,
+                text_color=("#F44336", "#EF5350"),
+                command=lambda rid=reply_id: self._cancel_pending_reply(rid),
+            ).pack(side="right")
+
         return card
+
+    def _toggle_sending(self):
+        scheduler = self.app.scheduler
+        if scheduler.is_sending_paused:
+            scheduler.resume_sending()
+        else:
+            scheduler.pause_sending()
+        self._update_sending_btn()
+
+    def _update_sending_btn(self):
+        scheduler = self.app.scheduler
+        if not scheduler.is_running:
+            self._sending_btn.configure(
+                text="未啟動海巡", state="disabled",
+                fg_color="gray50", hover_color="gray40",
+            )
+        elif scheduler.is_sending_paused:
+            self._sending_btn.configure(
+                text="開始發送", state="normal",
+                fg_color="#4CAF50", hover_color="#388E3C",
+            )
+        else:
+            self._sending_btn.configure(
+                text="暫停發送", state="normal",
+                fg_color="#FF9800", hover_color="#F57C00",
+            )
+
+    def _cancel_pending_reply(self, reply_id: int):
+        if CTkMessagebox:
+            msg = CTkMessagebox(
+                title="確認取消",
+                message="確定要取消這則待送出的回覆？\n貼文將回到審核佇列。",
+                icon="warning",
+                option_1="取消", option_2="確定",
+            )
+            if msg.get() != "確定":
+                return
+
+        post_id = self.app.repo.cancel_pending_reply(reply_id)
+        if post_id is None:
+            show_toast(self, "無法取消（狀態已改變）", "warning")
+            self.refresh()
+            return
+
+        self.app.reply_engine.cancel_reply(reply_id)
+        self.app.repo.update_post_status(post_id, "pending")
+        self.app.repo.log_audit("REPLY_CANCELLED", {
+            "reply_id": reply_id, "post_id": post_id,
+        })
+        show_toast(self, "已取消，貼文已回到審核佇列", "success")
+        self.refresh()
 
     def _delete_reply(self, reply_id: int, platform_reply_id: str, platform: str):
         if CTkMessagebox:

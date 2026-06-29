@@ -3,6 +3,7 @@
 import json
 import logging
 import random
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,7 @@ class ReplyEngine:
         self.adapters: dict[str, PlatformAdapter] = {}
         self._last_reply_time: dict[str, float] = {}
         self._scheduled_send_time: dict[int, float] = {}  # reply_id -> monotonic time to send
+        self._schedule_lock = threading.Lock()
 
     def _safe_int(self, setting_key: str, default: int) -> int:
         try:
@@ -147,6 +149,11 @@ class ReplyEngine:
             "post_id": post_id, "template_id": template_id, "platform": platform,
         })
 
+    def cancel_reply(self, reply_id: int):
+        """Remove a reply from the in-memory schedule."""
+        with self._schedule_lock:
+            self._scheduled_send_time.pop(reply_id, None)
+
     def send_pending_replies(self) -> int:
         """Send all pending replies. Returns number sent."""
         sent_count = 0
@@ -159,11 +166,12 @@ class ReplyEngine:
                ORDER BY rl.created_at ASC"""
         ).fetchall()
 
-        # Prune stale scheduled entries for replies no longer pending
-        active_ids = {row["id"] for row in rows}
-        stale_ids = [rid for rid in self._scheduled_send_time if rid not in active_ids]
-        for rid in stale_ids:
-            self._scheduled_send_time.pop(rid, None)
+        with self._schedule_lock:
+            # Prune stale scheduled entries for replies no longer pending
+            active_ids = {row["id"] for row in rows}
+            stale_ids = [rid for rid in self._scheduled_send_time if rid not in active_ids]
+            for rid in stale_ids:
+                self._scheduled_send_time.pop(rid, None)
 
         for row in rows:
             reply_id = row["id"]
@@ -191,22 +199,23 @@ class ReplyEngine:
                 if elapsed < min_interval:
                     continue
 
-            # Non-blocking random delay for human-like behavior
-            if reply_id not in self._scheduled_send_time:
-                min_delay = self._safe_int("reply_delay_min_sec", 180)
-                max_delay = self._safe_int("reply_delay_max_sec", 900)
-                delay = random.randint(min(min_delay, max_delay), max(min_delay, max_delay))
-                self._scheduled_send_time[reply_id] = time.monotonic() + delay
-                logger.info("Reply %d scheduled in %ds", reply_id, delay)
-                continue
+            with self._schedule_lock:
+                # Non-blocking random delay for human-like behavior
+                if reply_id not in self._scheduled_send_time:
+                    min_delay = self._safe_int("reply_delay_min_sec", 180)
+                    max_delay = self._safe_int("reply_delay_max_sec", 900)
+                    delay = random.randint(min(min_delay, max_delay), max(min_delay, max_delay))
+                    self._scheduled_send_time[reply_id] = time.monotonic() + delay
+                    logger.info("Reply %d scheduled in %ds", reply_id, delay)
+                    continue
 
-            if time.monotonic() < self._scheduled_send_time[reply_id]:
-                remaining = int(self._scheduled_send_time[reply_id] - time.monotonic())
-                logger.debug("Reply %d: %ds remaining", reply_id, remaining)
-                continue
+                if time.monotonic() < self._scheduled_send_time[reply_id]:
+                    remaining = int(self._scheduled_send_time[reply_id] - time.monotonic())
+                    logger.debug("Reply %d: %ds remaining", reply_id, remaining)
+                    continue
 
-            # Delay elapsed, clean up
-            self._scheduled_send_time.pop(reply_id, None)
+                # Delay elapsed, clean up
+                self._scheduled_send_time.pop(reply_id, None)
 
             # Check if already replied (API-level)
             try:
@@ -216,6 +225,16 @@ class ReplyEngine:
                     continue
             except Exception as e:
                 logger.warning("check_already_replied failed: %s", e)
+
+            # Atomic claim: skip if status changed (e.g. cancelled) since snapshot
+            claimed = self.repo.db.execute(
+                "UPDATE reply_log SET status = 'pending' WHERE id = ? AND status IN ('pending', 'retrying')",
+                (reply_id,),
+            ).rowcount
+            self.repo.db.commit()
+            if not claimed:
+                logger.info("Reply %d: skipped (status changed)", reply_id)
+                continue
 
             # Send reply
             success, platform_reply_id, error = adapter.reply_to_post(platform_post_id, reply_content)

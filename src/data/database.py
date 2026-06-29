@@ -4,7 +4,7 @@ import sqlite3
 import threading
 from typing import Optional
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 -- Schema version tracking
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS reply_log (
     reply_mode          TEXT NOT NULL CHECK(reply_mode IN ('semi_auto', 'full_auto')),
     platform_reply_id   TEXT,
     status              TEXT NOT NULL DEFAULT 'pending'
-                        CHECK(status IN ('pending', 'sent', 'failed', 'retrying')),
+                        CHECK(status IN ('pending', 'sent', 'failed', 'retrying', 'cancelled')),
     error_message       TEXT,
     retry_count         INTEGER DEFAULT 0,
     sent_at             TEXT,
@@ -144,6 +144,35 @@ _MIGRATIONS = [
     # (version, description, [sql_statements])
     (2, "Add deleted_at to reply_log", [
         "ALTER TABLE reply_log ADD COLUMN deleted_at TEXT;",
+        "CREATE INDEX IF NOT EXISTS idx_reply_log_deleted_at ON reply_log(deleted_at);",
+    ]),
+    (3, "Add cancelled to reply_log status", [
+        # SQLite cannot ALTER CHECK constraints — recreate the table
+        """CREATE TABLE IF NOT EXISTS reply_log_new (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            detected_post_id    INTEGER NOT NULL REFERENCES detected_posts(id),
+            template_id         INTEGER NOT NULL REFERENCES templates(id),
+            platform            TEXT NOT NULL,
+            reply_content       TEXT NOT NULL,
+            reply_mode          TEXT NOT NULL CHECK(reply_mode IN ('semi_auto', 'full_auto')),
+            platform_reply_id   TEXT,
+            status              TEXT NOT NULL DEFAULT 'pending'
+                                CHECK(status IN ('pending', 'sent', 'failed', 'retrying', 'cancelled')),
+            error_message       TEXT,
+            retry_count         INTEGER DEFAULT 0,
+            sent_at             TEXT,
+            deleted_at          TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );""",
+        """INSERT OR IGNORE INTO reply_log_new
+           SELECT id, detected_post_id, template_id, platform, reply_content,
+                  reply_mode, platform_reply_id, status, error_message,
+                  retry_count, sent_at, deleted_at, created_at
+           FROM reply_log;""",
+        "DROP TABLE IF EXISTS reply_log;",
+        "ALTER TABLE reply_log_new RENAME TO reply_log;",
+        "CREATE INDEX IF NOT EXISTS idx_reply_log_sent_at ON reply_log(sent_at);",
+        "CREATE INDEX IF NOT EXISTS idx_reply_log_status ON reply_log(status);",
         "CREATE INDEX IF NOT EXISTS idx_reply_log_deleted_at ON reply_log(deleted_at);",
     ]),
 ]

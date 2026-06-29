@@ -166,12 +166,23 @@ class DashboardFrame(ctk.CTkFrame):
             font=ctk.CTkFont(size=22, weight="bold"),
         ).grid(row=0, column=0, sticky="w")
 
+        btn_row = ctk.CTkFrame(header, fg_color="transparent")
+        btn_row.grid(row=0, column=2, sticky="e")
+
+        self._sending_btn = ctk.CTkButton(
+            btn_row, text="暫停發送", width=100, height=36,
+            fg_color="#FF9800", hover_color="#F57C00",
+            command=self._toggle_sending,
+        )
+        self._sending_btn.pack(side="left", padx=(0, 8))
+        self._sending_btn.pack_forget()  # hidden until patrol starts
+
         self._patrol_btn = ctk.CTkButton(
-            header, text="啟動海巡", width=120, height=36,
+            btn_row, text="啟動海巡", width=120, height=36,
             fg_color="#4CAF50", hover_color="#388E3C",
             command=self._toggle_patrol,
         )
-        self._patrol_btn.grid(row=0, column=2, sticky="e")
+        self._patrol_btn.pack(side="left")
 
         self._patrol_status = ctk.CTkLabel(
             header, text="未啟動", text_color="gray50",
@@ -457,6 +468,25 @@ class DashboardFrame(ctk.CTkFrame):
 
         self._update_patrol_ui()
 
+    def _toggle_sending(self):
+        scheduler = self.app.scheduler
+        if scheduler.is_sending_paused:
+            scheduler.resume_sending()
+        else:
+            scheduler.pause_sending()
+        self._update_sending_btn()
+
+    def _update_sending_btn(self):
+        scheduler = self.app.scheduler
+        if scheduler.is_sending_paused:
+            self._sending_btn.configure(
+                text="開始發送", fg_color="#4CAF50", hover_color="#388E3C",
+            )
+        else:
+            self._sending_btn.configure(
+                text="暫停發送", fg_color="#FF9800", hover_color="#F57C00",
+            )
+
     def _update_patrol_ui(self):
         if self.app.scheduler.is_running:
             self._patrol_btn.configure(text="停止海巡", fg_color="#F44336", hover_color="#D32F2F")
@@ -469,6 +499,9 @@ class DashboardFrame(ctk.CTkFrame):
                 ]
                 status_text = f"海巡中 ({', '.join(labels)})"
             self._patrol_status.configure(text=status_text, text_color=("#4CAF50", "#66BB6A"))
+            # Show sending toggle button
+            self._sending_btn.pack(side="left", padx=(0, 8), before=self._patrol_btn)
+            self._update_sending_btn()
             # Show live session counts
             self._refresh_live_counter()
             # Start auto-refresh loop for live counter
@@ -477,6 +510,7 @@ class DashboardFrame(ctk.CTkFrame):
             self._patrol_btn.configure(text="啟動海巡", fg_color="#4CAF50", hover_color="#388E3C")
             self._patrol_status.configure(text="未啟動", text_color="gray50")
             self._live_counter.configure(text="")
+            self._sending_btn.pack_forget()
             self._stop_live_counter_loop()
 
     def _refresh_live_counter(self):
