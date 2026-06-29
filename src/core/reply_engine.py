@@ -48,18 +48,26 @@ class ReplyEngine:
         new_count = 0
         templates = self.template_manager.get_all()
 
+        skipped_empty = 0
+        skipped_dup = 0
+        skipped_irrelevant = 0
         for raw in raw_posts:
             post_id = raw.get("platform_post_id", "")
             content = raw.get("post_content", "")
 
             if not post_id or not content:
+                skipped_empty += 1
                 continue
 
             if self.repo.is_post_already_detected(platform, post_id):
+                skipped_dup += 1
                 continue
 
             result = self.matcher.match(content)
             if not result.is_relevant:
+                skipped_irrelevant += 1
+                if skipped_irrelevant <= 3:
+                    logger.debug("Irrelevant post (score=%.1f): %s", result.score, content[:80])
                 continue
 
             recommended = self.matcher.recommend_templates(result, templates, platform, top_n=1)
@@ -94,6 +102,11 @@ class ReplyEngine:
                 if status == "approved" and rec_id:
                     self._queue_auto_reply(inserted_id, rec_id, platform, recommended[0].content)
 
+        if raw_posts:
+            logger.info(
+                "process_fetched_posts(%s): total=%d, empty=%d, dup=%d, irrelevant=%d, new=%d",
+                platform, len(raw_posts), skipped_empty, skipped_dup, skipped_irrelevant, new_count,
+            )
         return new_count
 
     def _ollama_evaluate(self, content: str, result) -> str:

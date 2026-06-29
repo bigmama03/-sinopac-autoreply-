@@ -16,7 +16,8 @@ THREADS_HOME_URL = "https://www.threads.com/"
 SEARCH_URL = "https://www.threads.com/search?q={keyword}&serp_type=default"
 
 # Selectors — update when threads.com DOM changes
-SEL_POST_ARTICLE = "article"
+# Threads uses div containers (not <article>); detect posts by their permalink links
+SEL_POST_ARTICLE = "div[data-pressable-container='true'], article, div[role='article']"
 SEL_POST_LINK = "a[href*='/post/']"
 SEL_POST_LINK_ALT = "a[href*='threads.com/@'][href*='/post/']"
 SEL_PROFILE_LINK = "a[href^='/@']"
@@ -31,8 +32,8 @@ SEL_LOGIN_INPUT = "input[name='login_identifier']"
 SEL_LOGIN_PASSWORD = "input[type='password']"
 SEL_LOGIN_FORM = "form"
 SEL_LOGGED_IN_PROFILE = "a[href='/'][role='link'], a[href^='/@'][role='link']"
-SEL_REPLY_AUTHOR_LINK = "article a[href^='/@']"
-SEL_REPLY_AUTHOR_LINK_ABS = "article a[href*='threads.com/@']"
+SEL_REPLY_AUTHOR_LINK = "a[href^='/@']"
+SEL_REPLY_AUTHOR_LINK_ABS = "a[href*='threads.com/@']"
 SEL_MORE_BUTTON = "svg[aria-label='More'], button[aria-label='More'], div[role='button'][aria-label='More']"
 SEL_MENU_DELETE = "[role='menuitem']"
 SEL_CONFIRM_DELETE = "button"
@@ -105,21 +106,40 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                     self._sleep(1.0, 2.0)
                     dismissed = self._dismiss_login_modal(page)
                     if dismissed:
-                        logger.info("Modal dismissed for keyword=%s, re-waiting for posts", kw)
-                    if not self._wait_for_posts(page, timeout=15000):
+                        # Modal dismissal may redirect to home; re-navigate to search
+                        current = page.url
+                        if kw not in current and "search" not in current:
+                            logger.info("Modal dismissed but redirected to %s, re-navigating to search for keyword=%s", current[:80], kw)
+                            if not self._safe_goto(page, search_url, timeout=15000):
+                                continue
+                            self._sleep(1.0, 2.0)
+                        else:
+                            logger.info("Modal dismissed for keyword=%s", kw)
+                    self._capture_screenshot(page)
+                    posts_ready = self._wait_for_posts(page, timeout=15000)
+                    self._capture_screenshot(page)
+                    # Debug: always log page state for search pages
+                    try:
+                        container_count = page.locator(SEL_POST_ARTICLE).count()
+                        link_count = page.locator(f"{SEL_POST_LINK}, {SEL_POST_LINK_ALT}").count()
+                        logger.info(
+                            "Search page for keyword=%s: url=%s, containers=%d, post_links=%d, posts_ready=%s",
+                            kw, page.url[:100], container_count, link_count, posts_ready,
+                        )
+                    except Exception:
+                        pass
+                    if not posts_ready:
                         if self._is_search_empty(page):
                             logger.info("Threads search empty for keyword=%s", kw)
                         elif self._is_login_page(page):
                             logger.error("Threads session expired during search (url=%s)", page.url[:120])
                             return []
                         else:
-                            # Debug: log page state for troubleshooting
                             try:
-                                article_count = page.locator("article").count()
                                 body_text = page.locator("body").inner_text(timeout=3000)[:300]
                                 logger.warning(
-                                    "Threads search did not load for keyword=%s (url=%s, articles=%d, body_preview=%s)",
-                                    kw, page.url[:120], article_count, body_text[:200],
+                                    "Threads search did not load for keyword=%s (body_preview=%s)",
+                                    kw, body_text[:200],
                                 )
                             except Exception:
                                 logger.warning("Threads search did not load for keyword=%s (url=%s)", kw, page.url[:120])
@@ -130,7 +150,9 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                         except Exception:
                             break
                         time.sleep(random.uniform(0.8, 1.5))
-                    for post in self._extract_posts(page):
+                    extracted = self._extract_posts(page)
+                    logger.info("Extracted %d posts for keyword=%s", len(extracted), kw)
+                    for post in extracted:
                         pid = post.get("platform_post_id")
                         if pid and pid not in deduped:
                             deduped[pid] = post
@@ -258,20 +280,50 @@ class ThreadsBrowserAdapter(PlatformAdapter):
         The modal shows "透過 Threads 暢所欲言" with a
         "使用 Instagram 帳號繼續 <username>" button.
         """
-        # Strategy 1: text-based search for "使用 Instagram 帳號繼續" button
-        # Using get_by_text for robust partial matching regardless of element type
-        for text_pattern in ("使用 Instagram 帳號繼續", "Continue with Instagram"):
+        # Primary: detect modal by title text and iterate actual button elements.
+        # This is the most reliable approach — text/CSS selectors may find the
+        # text but clicking a <span> inside the button doesn't trigger the action.
+        for modal_title in ("透過 Threads 暢所欲言", "Say more on Threads", "Log in to Threads"):
             try:
-                loc = page.get_by_text(text_pattern).first
-                if loc.is_visible(timeout=2000):
-                    logger.info("Threads login modal detected (text='%s'), clicking to dismiss", text_pattern)
-                    loc.click(timeout=5000)
+                title_loc = page.get_by_text(modal_title)
+                if not title_loc.is_visible(timeout=1500):
+                    continue
+                logger.info("Threads modal detected: '%s'", modal_title)
+                buttons = page.locator("div[role='button'], button").all()
+                for btn in buttons[:15]:
+                    try:
+                        btn_text = btn.inner_text(timeout=1000).strip()
+                        if "instagram" in btn_text.lower() or "繼續" in btn_text or "continue" in btn_text.lower():
+                            logger.info("Clicking modal button: '%s'", btn_text[:60])
+                            btn.click(timeout=5000)
+                            time.sleep(random.uniform(2.5, 4.0))
+                            try:
+                                page.wait_for_load_state("domcontentloaded", timeout=10000)
+                            except Exception:
+                                pass
+                            logger.info("Modal dismissed (url=%s)", page.url[:120])
+                            try:
+                                self._bm.save_session(PLATFORM)
+                            except Exception:
+                                pass
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+        # Fallback: try get_by_role for the "Continue with Instagram" button
+        for label in ("使用 Instagram 帳號繼續", "Continue with Instagram"):
+            try:
+                btn = page.get_by_role("button", name=label).first
+                if btn.is_visible(timeout=1000):
+                    logger.info("Threads modal button found by role: '%s'", label)
+                    btn.click(timeout=5000)
                     time.sleep(random.uniform(2.5, 4.0))
                     try:
                         page.wait_for_load_state("domcontentloaded", timeout=10000)
                     except Exception:
                         pass
-                    logger.info("Threads login modal dismissed (url=%s)", page.url[:120])
                     try:
                         self._bm.save_session(PLATFORM)
                     except Exception:
@@ -280,28 +332,7 @@ class ThreadsBrowserAdapter(PlatformAdapter):
             except Exception:
                 pass
 
-        # Strategy 2: CSS selector-based search
-        for sel in (SEL_MODAL_CONTINUE_INSTAGRAM, SEL_MODAL_CONTINUE_INSTAGRAM_EN):
-            try:
-                loc = page.locator(sel).first
-                if loc.is_visible(timeout=1000):
-                    logger.info("Threads login modal detected (css), clicking to dismiss")
-                    loc.click(timeout=5000)
-                    time.sleep(random.uniform(2.5, 4.0))
-                    try:
-                        page.wait_for_load_state("domcontentloaded", timeout=10000)
-                    except Exception:
-                        pass
-                    logger.info("Threads login modal dismissed (url=%s)", page.url[:120])
-                    try:
-                        self._bm.save_session(PLATFORM)
-                    except Exception:
-                        pass
-                    return True
-            except Exception:
-                pass
-
-        # Strategy 3: close modal via X button
+        # Last resort: close modal via X button
         try:
             close_btn = page.locator(SEL_MODAL_CLOSE).first
             if close_btn.is_visible(timeout=1000):
@@ -311,36 +342,6 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                 return True
         except Exception:
             pass
-
-        # Strategy 4: detect modal by its title text and try clicking any button inside
-        for modal_title in ("透過 Threads 暢所欲言", "Say more on Threads"):
-            try:
-                title_loc = page.get_by_text(modal_title)
-                if title_loc.is_visible(timeout=1000):
-                    logger.info("Threads modal overlay detected by title '%s'", modal_title)
-                    # Find and click the first prominent button near the title
-                    # The "Continue with Instagram" button is usually a role=button or <button>
-                    buttons = page.locator("div[role='button'], button").all()
-                    for btn in buttons[:10]:
-                        try:
-                            btn_text = btn.inner_text(timeout=1000)
-                            if "instagram" in btn_text.lower() or "繼續" in btn_text or "登入" in btn_text:
-                                logger.info("Clicking modal button: '%s'", btn_text.strip()[:60])
-                                btn.click(timeout=5000)
-                                time.sleep(random.uniform(2.5, 4.0))
-                                try:
-                                    page.wait_for_load_state("domcontentloaded", timeout=10000)
-                                except Exception:
-                                    pass
-                                try:
-                                    self._bm.save_session(PLATFORM)
-                                except Exception:
-                                    pass
-                                return True
-                        except Exception:
-                            continue
-            except Exception:
-                pass
 
         return False
 
@@ -353,13 +354,16 @@ class ThreadsBrowserAdapter(PlatformAdapter):
             return False
 
     def _wait_for_posts(self, page: Page, timeout: int = 10000) -> bool:
-        try:
-            page.wait_for_selector(SEL_POST_ARTICLE, timeout=timeout)
-            return True
-        except PlaywrightTimeoutError:
-            return False
-        except Exception:
-            return False
+        # Try container selectors first, then fall back to post link detection
+        for selector in (SEL_POST_ARTICLE, SEL_POST_LINK, SEL_POST_LINK_ALT):
+            try:
+                page.wait_for_selector(selector, timeout=timeout)
+                return True
+            except PlaywrightTimeoutError:
+                continue
+            except Exception:
+                continue
+        return False
 
     def _is_search_empty(self, page: Page) -> bool:
         try:
@@ -369,11 +373,13 @@ class ThreadsBrowserAdapter(PlatformAdapter):
 
     def _extract_posts(self, page: Page) -> list[dict]:
         posts: list[dict] = []
+
+        # Strategy 1: find post containers (article, div[data-pressable-container], etc.)
         try:
             articles = page.locator(SEL_POST_ARTICLE)
             count = min(articles.count(), 60)
         except Exception:
-            return posts
+            count = 0
         for i in range(count):
             try:
                 article = articles.nth(i)
@@ -381,13 +387,57 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                 if not post_url:
                     continue
                 posts.append({
-                    "platform_post_id": post_url,  # Use full URL as ID
+                    "platform_post_id": post_url,
                     "post_url": post_url,
                     "author_username": self._extract_post_author(article),
                     "post_content": self._extract_post_content(article),
                 })
             except Exception:
                 logger.debug("Failed to extract article at index=%d", i, exc_info=True)
+
+        if posts:
+            return posts
+
+        # Strategy 2: no container matched — extract posts by finding permalink links
+        # and walking up to their closest ancestor that contains post content
+        logger.debug("No post containers found, trying link-based extraction")
+        seen_urls: set[str] = set()
+        try:
+            links = page.locator(f"{SEL_POST_LINK}, {SEL_POST_LINK_ALT}")
+            link_count = min(links.count(), 60)
+        except Exception:
+            return posts
+        for i in range(link_count):
+            try:
+                link = links.nth(i)
+                href = link.get_attribute("href", timeout=2000)
+                post_url = self._normalize_url(href)
+                if not post_url or post_url in seen_urls:
+                    continue
+                seen_urls.add(post_url)
+                # Walk up to find a container with text content
+                # Try the link's closest ancestor with post-like content
+                container = link.locator("xpath=ancestor::div[.//a[contains(@href,'/@')]]").first
+                author = ""
+                content = ""
+                try:
+                    author = self._extract_post_author(container)
+                except Exception:
+                    pass
+                try:
+                    content = self._extract_post_content(container)
+                except Exception:
+                    pass
+                posts.append({
+                    "platform_post_id": post_url,
+                    "post_url": post_url,
+                    "author_username": author,
+                    "post_content": content,
+                })
+            except Exception:
+                logger.debug("Failed to extract link-based post at index=%d", i, exc_info=True)
+
+        logger.info("Link-based extraction found %d posts", len(posts))
         return posts
 
     def _extract_post_url(self, article: Locator) -> str:
@@ -562,6 +612,13 @@ class ThreadsBrowserAdapter(PlatformAdapter):
         except Exception:
             pass
         return None
+
+    def _capture_screenshot(self, page: Page) -> None:
+        """Take a screenshot and store it in BrowserManager for PIP preview."""
+        try:
+            self._bm.set_screenshot(page.screenshot(type="jpeg", quality=60))
+        except Exception:
+            pass
 
     def _sleep(self, lo: float, hi: float) -> None:
         time.sleep(random.uniform(lo, hi))

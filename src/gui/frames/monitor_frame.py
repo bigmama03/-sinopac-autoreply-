@@ -1,9 +1,11 @@
 """Monitor frame — shows detected posts from patrol."""
 
+import io
 import json
 import webbrowser
 from datetime import datetime
 import customtkinter as ctk
+from PIL import Image
 
 from src.gui.widgets.expandable_text import ExpandableText
 from src.gui.widgets.toast import show_toast
@@ -142,9 +144,40 @@ class MonitorFrame(ctk.CTkFrame):
         self._displayed = 0
         self._check_vars: dict[int, ctk.StringVar] = {}  # post.id -> var
 
-        # Patrol log panel
-        log_header = ctk.CTkFrame(self, fg_color="transparent")
-        log_header.grid(row=4, column=0, sticky="ew", pady=(8, 2))
+        # Bottom panel: browser preview (left) + patrol log (right)
+        bottom_panel = ctk.CTkFrame(self, fg_color="transparent")
+        bottom_panel.grid(row=4, column=0, rowspan=2, sticky="nsew", pady=(8, 0))
+        bottom_panel.grid_columnconfigure(1, weight=1)
+        bottom_panel.grid_rowconfigure(1, weight=1)
+
+        # -- Browser preview (left side) --
+        preview_frame = ctk.CTkFrame(bottom_panel)
+        preview_frame.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 8))
+
+        ctk.CTkLabel(
+            preview_frame, text="瀏覽器即時預覽",
+            font=ctk.CTkFont(size=13, weight="bold"),
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+
+        self._preview_width = 384
+        self._preview_height = 240
+        self._preview_label = ctk.CTkLabel(
+            preview_frame, text="海巡未啟動",
+            text_color="gray50",
+            width=self._preview_width, height=self._preview_height,
+        )
+        self._preview_label.pack(padx=10, pady=(0, 8))
+        self._preview_image = None  # keep CTkImage reference
+        self._preview_after_id = None
+
+        # -- Patrol log (right side) --
+        log_frame = ctk.CTkFrame(bottom_panel, fg_color="transparent")
+        log_frame.grid(row=0, column=1, rowspan=2, sticky="nsew")
+        log_frame.grid_rowconfigure(1, weight=1)
+        log_frame.grid_columnconfigure(0, weight=1)
+
+        log_header = ctk.CTkFrame(log_frame, fg_color="transparent")
+        log_header.grid(row=0, column=0, sticky="ew", pady=(0, 2))
         log_header.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -172,10 +205,10 @@ class MonitorFrame(ctk.CTkFrame):
         ).pack(side="left")
 
         self._log_textbox = ctk.CTkTextbox(
-            self, height=150, font=ctk.CTkFont(family="monospace", size=11),
+            log_frame, height=150, font=ctk.CTkFont(family="monospace", size=11),
             state="disabled", wrap="word",
         )
-        self._log_textbox.grid(row=5, column=0, sticky="nsew")
+        self._log_textbox.grid(row=1, column=0, sticky="nsew")
         self._patrol_log_lines: list[str] = []
         self._max_log_lines = 200
 
@@ -191,11 +224,13 @@ class MonitorFrame(ctk.CTkFrame):
                 self.append_patrol_log(level, message)
             self.app._patrol_log_buffer.clear()
 
-        # Update patrol indicator
+        # Update patrol indicator + preview polling
         if self.app.scheduler.is_running:
             self._patrol_indicator.configure(text="海巡中...")
+            self._start_preview_polling()
         else:
             self._patrol_indicator.configure(text="")
+            self._stop_preview_polling()
 
         # Load all posts
         self._all_posts = []
@@ -527,3 +562,45 @@ class MonitorFrame(ctk.CTkFrame):
         self._log_textbox.configure(state="normal")
         self._log_textbox.delete("1.0", "end")
         self._log_textbox.configure(state="disabled")
+
+    # -- Browser PIP preview --
+
+    def _start_preview_polling(self):
+        """Start polling for browser screenshots."""
+        if self._preview_after_id is not None:
+            return  # Already polling
+        self._poll_preview()
+
+    def _stop_preview_polling(self):
+        """Stop polling for browser screenshots."""
+        if self._preview_after_id is not None:
+            self.after_cancel(self._preview_after_id)
+            self._preview_after_id = None
+
+    def _poll_preview(self):
+        """Periodically fetch and display the latest browser screenshot."""
+        try:
+            data = self.app.browser_manager.get_screenshot()
+            if data:
+                img = Image.open(io.BytesIO(data))
+                # Scale to fit preview area while maintaining aspect ratio
+                img.thumbnail((self._preview_width, self._preview_height), Image.LANCZOS)
+                ctk_img = ctk.CTkImage(
+                    light_image=img, dark_image=img,
+                    size=(img.width, img.height),
+                )
+                self._preview_label.configure(image=ctk_img, text="")
+                self._preview_image = ctk_img  # prevent garbage collection
+            elif self.app.scheduler.is_running:
+                self._preview_label.configure(text="等待瀏覽器截圖...", image="")
+        except Exception:
+            pass
+
+        # Continue polling if patrol is running
+        if self.app.scheduler.is_running:
+            self._preview_after_id = self.after(1500, self._poll_preview)
+        else:
+            self._preview_after_id = None
+            self._preview_label.configure(text="海巡未啟動", image="")
+            self._preview_image = None
+            self.app.browser_manager.clear_screenshot()

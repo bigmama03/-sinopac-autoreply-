@@ -49,14 +49,16 @@ class ReviewFrame(ctk.CTkFrame):
         self._widgets: list[ctk.CTkFrame] = []
         self._pending_posts = []
         self._selected_index = 0
-        self._card_data: list[dict] = []  # stores per-card references
+        self._card_data: list[dict] = []
+        self._page_size = 10
+        self._displayed = 0
+        self._cached_post_ids: list[int] = []  # track if data changed
 
         # Keyboard bindings — bind on show, unbind on hide
         self.bind("<Map>", lambda e: self._on_visible())
         self.bind("<Unmap>", lambda e: self._unbind_keys())
 
     def _on_visible(self, event=None):
-        """Bind keyboard shortcuts when frame becomes visible."""
         top = self.winfo_toplevel()
         top.bind("<a>", lambda e: self._key_approve())
         top.bind("<A>", lambda e: self._key_approve())
@@ -73,15 +75,28 @@ class ReviewFrame(ctk.CTkFrame):
             top.unbind(key)
 
     def refresh(self):
-        self._pending_posts = self.app.repo.get_pending_posts()
-        self._count_label.configure(text=f"{len(self._pending_posts)} 則待審核")
+        posts = self.app.repo.get_pending_posts()
+        new_ids = [p.id for p in posts]
 
+        # Skip full rebuild if data hasn't changed
+        if new_ids == self._cached_post_ids:
+            return
+
+        self._pending_posts = posts
+        self._cached_post_ids = new_ids
+        self._count_label.configure(text=f"{len(posts)} 則待審核")
+
+        # Load templates once for all cards
+        self._templates_cache = self.app.template_manager.get_all()
+
+        # Clear all widgets
         for w in self._widgets:
             w.destroy()
         self._widgets.clear()
         self._card_data.clear()
+        self._displayed = 0
 
-        if not self._pending_posts:
+        if not posts:
             self._selected_index = 0
             empty = ctk.CTkLabel(
                 self._scroll_frame,
@@ -93,21 +108,46 @@ class ReviewFrame(ctk.CTkFrame):
             self._widgets.append(empty)
             return
 
-        for i, post in enumerate(self._pending_posts):
-            card = self._create_review_card(post, i)
-            self._widgets.append(card)
+        self._load_page()
 
-        # Clamp selection
         if self._selected_index >= len(self._pending_posts):
             self._selected_index = max(0, len(self._pending_posts) - 1)
         self._highlight_selected()
+
+    def _load_page(self):
+        """Load next batch of review cards."""
+        start = self._displayed
+        end = min(start + self._page_size, len(self._pending_posts))
+
+        # Remove previous "load more" button
+        if self._widgets and isinstance(self._widgets[-1], ctk.CTkButton):
+            self._widgets[-1].destroy()
+            self._widgets.pop()
+
+        for i in range(start, end):
+            card = self._create_review_card(self._pending_posts[i], i)
+            self._widgets.append(card)
+
+        self._displayed = end
+
+        # Add "load more" if needed
+        remaining = len(self._pending_posts) - self._displayed
+        if remaining > 0:
+            btn = ctk.CTkButton(
+                self._scroll_frame,
+                text=f"載入更多（剩餘 {remaining} 則）",
+                width=200, height=32,
+                fg_color="transparent", border_width=1,
+                command=self._load_page,
+            )
+            btn.grid(row=self._displayed, column=0, pady=10)
+            self._widgets.append(btn)
 
     def _create_review_card(self, post, index: int) -> ctk.CTkFrame:
         card = ctk.CTkFrame(self._scroll_frame)
         card.grid(row=index, column=0, sticky="ew", pady=4, padx=2)
         card.grid_columnconfigure(0, weight=1)
 
-        # Click to select
         card.bind("<Button-1>", lambda e, idx=index: self._select_card(idx))
 
         # Row 0: Post info
@@ -146,10 +186,10 @@ class ReviewFrame(ctk.CTkFrame):
             wraplength=700,
         ).grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 4))
 
-        # Row 2: Template selector
-        templates = self.app.template_manager.get_all()
+        # Row 2: Template selector — use cached templates
+        templates = list(self._templates_cache)
         if post.recommended_template_id:
-            rec = self.app.template_manager.get_by_id(post.recommended_template_id)
+            rec = next((t for t in templates if t.id == post.recommended_template_id), None)
             if rec:
                 templates = [rec] + [t for t in templates if t.id != rec.id]
 
@@ -183,7 +223,6 @@ class ReviewFrame(ctk.CTkFrame):
         reply_textbox.grid(row=4, column=0, sticky="ew", padx=10, pady=(2, 4))
         reply_textbox.insert("0.0", initial_content)
 
-        # Track edits to show modified indicator
         edit_indicator = ctk.CTkLabel(
             card, text="", font=ctk.CTkFont(size=10), text_color=("#FF9800", "#FFA726"),
         )
@@ -224,7 +263,6 @@ class ReviewFrame(ctk.CTkFrame):
             command=lambda pid=post.id: self._reject_post(pid),
         ).pack(side="left")
 
-        # Store card data for keyboard shortcuts
         self._card_data.append({
             "post": post,
             "card": card,
@@ -240,7 +278,6 @@ class ReviewFrame(ctk.CTkFrame):
         return card
 
     def _on_template_change(self, card_index: int):
-        """Update the reply preview when template selection changes."""
         if card_index >= len(self._card_data):
             return
         data = self._card_data[card_index]
@@ -336,6 +373,7 @@ class ReviewFrame(ctk.CTkFrame):
             show_toast(self, "已核准，回覆將自動送出", "success")
         except Exception as e:
             self._show_error(f"核准失敗: {e}")
+        self._cached_post_ids.clear()  # force rebuild on next refresh
         self.refresh()
 
     def _skip_post(self, post_id: int):
@@ -345,6 +383,7 @@ class ReviewFrame(ctk.CTkFrame):
             show_toast(self, "已跳過", "info")
         except Exception as e:
             self._show_error(f"操作失敗: {e}")
+        self._cached_post_ids.clear()
         self.refresh()
 
     def _reject_post(self, post_id: int):
@@ -354,6 +393,7 @@ class ReviewFrame(ctk.CTkFrame):
             show_toast(self, "已拒絕", "warning")
         except Exception as e:
             self._show_error(f"操作失敗: {e}")
+        self._cached_post_ids.clear()
         self.refresh()
 
     def _show_error(self, msg: str):

@@ -52,6 +52,7 @@ class BrowserManager:
         self._contexts: dict[str, BrowserContext] = {}
         self._lock = threading.RLock()
         self._browser_tid: Optional[int] = None  # thread that created the browser
+        self._latest_screenshot: Optional[bytes] = None  # PIP preview buffer
 
     def set_headless(self, headless: bool) -> None:
         """Change headless mode. Closes existing browser; next operation uses new mode."""
@@ -322,6 +323,18 @@ class BrowserManager:
                     pass
                 del self._contexts[platform]
             # Next get_context() call will reload from the saved session
+
+    def set_screenshot(self, data: bytes) -> None:
+        """Store a screenshot for PIP preview (called from patrol thread)."""
+        self._latest_screenshot = data
+
+    def get_screenshot(self) -> Optional[bytes]:
+        """Get the latest screenshot bytes (called from GUI thread)."""
+        return self._latest_screenshot
+
+    def clear_screenshot(self) -> None:
+        """Clear the screenshot buffer."""
+        self._latest_screenshot = None
 
     def close_context(self, platform: str) -> None:
         """Save session and close a specific platform context."""
