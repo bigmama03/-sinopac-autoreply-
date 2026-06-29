@@ -1,5 +1,6 @@
 """Review queue frame — semi-auto approval workflow."""
 
+import webbrowser
 import customtkinter as ctk
 
 from src.gui.widgets.expandable_text import ExpandableText
@@ -262,6 +263,14 @@ class ReviewFrame(ctk.CTkFrame):
             text_color=("red", "#EF5350"),
             command=lambda pid=post.id: self._reject_post(pid),
         ).pack(side="left")
+
+        if post.post_url:
+            ctk.CTkButton(
+                btn_frame, text="查看原文", width=80, height=30,
+                fg_color="transparent", border_width=1,
+                text_color=("#2196F3", "#64B5F6"),
+                command=lambda url=post.post_url: webbrowser.open(url),
+            ).pack(side="right")
 
         self._card_data.append({
             "post": post,
