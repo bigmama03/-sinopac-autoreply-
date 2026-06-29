@@ -46,9 +46,10 @@ TAG_NO_RESULTS_TEXT = "text=/No posts yet|沒有貼文|No results found/i"
 POST_DIALOG_SELECTOR = "div[role='dialog']"
 POST_ARTICLE_SELECTOR = "main article"
 
-POST_HEADER_AUTHOR_SELECTOR = "header a[href^='/']"
-POST_CAPTION_CONTAINER_SELECTOR = "ul li, article h1, article span, article div[dir='auto']"
+POST_HEADER_AUTHOR_SELECTOR = "header a[href^='/'], article a[href^='/'], main a[href^='/']"
+POST_CAPTION_CONTAINER_SELECTOR = "h1, article span, article div[dir='auto'], main span[dir='auto']"
 POST_CAPTION_AUTHOR_LINK_SELECTOR = "a[href^='/']"
+POST_CONTENT_WAIT_SELECTORS = ("main article", "article", "div[role='dialog']", "main section", "main h1")
 POST_COMMENT_BOX_SELECTOR = "form textarea[placeholder]"
 POST_COMMENT_TEXTAREA_SELECTOR = "textarea[aria-label*='comment' i]"
 POST_COMMENT_EDITABLE_SELECTOR = "div[contenteditable='true'][role='textbox']"
@@ -157,9 +158,15 @@ class InstagramBrowserAdapter(PlatformAdapter):
                             logger.error("Instagram session expired during search (url=%s)", page.url[:120])
                             return []
 
+                        # IG may redirect /explore/tags/ to /explore/search/keyword/
+                        # — the grid structure differs, but post links are still present
+                        current_url = page.url
+                        if "/explore/search/" in current_url and "/tags/" not in current_url:
+                            logger.info("Instagram redirected tag search to %s for keyword=%s", current_url[:100], keyword)
+
                         if not self._wait_for_media_grid(page):
                             self._capture_screenshot(page)
-                            logger.error("Instagram media grid not found for keyword=%s", keyword)
+                            logger.warning("Instagram media grid not found for keyword=%s (url=%s)", keyword, page.url[:100])
                             continue
 
                         self._capture_screenshot(page)
@@ -478,13 +485,18 @@ class InstagramBrowserAdapter(PlatformAdapter):
             return None
 
         self._wait_for_page_settle(page)
-        try:
-            page.wait_for_selector(POST_ARTICLE_SELECTOR, timeout=5000)
-        except Exception:
+
+        # Try multiple selectors — IG DOM changes frequently
+        content_loaded = False
+        for sel in POST_CONTENT_WAIT_SELECTORS:
             try:
-                page.wait_for_selector(POST_DIALOG_SELECTOR, timeout=3000)
+                page.wait_for_selector(sel, timeout=3000)
+                content_loaded = True
+                break
             except Exception:
-                logger.debug("Instagram post content selectors did not explicitly appear", exc_info=True)
+                continue
+        if not content_loaded:
+            logger.debug("Instagram post page: no content selectors matched (url=%s)", page.url[:100])
 
         shortcode = self._extract_shortcode_from_url(page.url)
         if not shortcode:
@@ -496,10 +508,16 @@ class InstagramBrowserAdapter(PlatformAdapter):
         author_username = self._extract_post_author(page)
         post_content = self._extract_post_caption(page)
 
+        # Fallback: try meta tags for content if DOM extraction failed
+        if not post_content:
+            post_content = self._extract_meta_content(page)
+
+        # Preserve original URL type (post vs reel)
+        actual_url = page.url if page.url.startswith("https://www.instagram.com/") else post_url
         return {
             "platform": "instagram",
             "platform_post_id": shortcode,
-            "post_url": INSTAGRAM_POST_URL_TEMPLATE.format(shortcode=shortcode),
+            "post_url": actual_url,
             "author_username": author_username,
             "post_content": post_content,
             "keyword_matched": keyword,
@@ -516,16 +534,22 @@ class InstagramBrowserAdapter(PlatformAdapter):
     def _extract_post_author(self, page: Page) -> str:
         script = """
         ({ selector }) => {
+            const excluded = new Set(['p', 'reel', 'explore', 'accounts', 'reels', 'direct', 'stories', 'challenge', 'tags']);
             const links = Array.from(document.querySelectorAll(selector));
             for (const link of links) {
                 const href = link.getAttribute('href') || '';
-                const text = (link.textContent || '').trim();
-                const match = href.match(/^\\/([A-Za-z0-9._]+)\\/$/);
+                const match = href.match(/^\\/([A-Za-z0-9._]+)\\/?$/);
                 if (!match) continue;
                 const candidate = match[1];
-                if (candidate === 'p') continue;
-                if (text && text.replace(/^@/, '') === candidate) return candidate;
-                if (candidate) return candidate;
+                if (excluded.has(candidate)) continue;
+                return candidate;
+            }
+            // Fallback: try meta tag
+            const metaAuthor = document.querySelector('meta[property="instapp:owner_user_id"]');
+            const ogTitle = document.querySelector('meta[property="og:title"]');
+            if (ogTitle) {
+                const titleMatch = (ogTitle.content || '').match(/^@?([A-Za-z0-9._]+)/);
+                if (titleMatch && !excluded.has(titleMatch[1])) return titleMatch[1];
             }
             return '';
         }
@@ -546,15 +570,18 @@ class InstagramBrowserAdapter(PlatformAdapter):
             const items = Array.from(document.querySelectorAll(selector));
             for (const item of items) {
                 const text = (item.innerText || item.textContent || '').trim();
-                if (!text) continue;
+                if (!text || text.length <= 1) continue;
 
+                // Strip author prefix if present
                 const headerLink = item.querySelector(authorLinkSelector);
                 const authorText = (headerLink?.textContent || '').trim();
+                let cleaned = text;
                 if (authorText && text.startsWith(authorText)) {
-                    return text.slice(authorText.length).trim();
+                    cleaned = text.slice(authorText.length).trim();
                 }
 
-                if (text.length > 1) return text;
+                // Return first plausible caption (ordered by selector specificity)
+                if (cleaned.length > 1) return cleaned;
             }
             return '';
         }
@@ -574,6 +601,33 @@ class InstagramBrowserAdapter(PlatformAdapter):
         if not isinstance(caption, str):
             return ""
         return re.sub(r"\s+", " ", caption).strip()
+
+    def _extract_meta_content(self, page: Page) -> str:
+        """Fallback: extract post content from OpenGraph meta tags."""
+        script = """
+        () => {
+            const og = document.querySelector('meta[property="og:description"]');
+            if (og && og.content) return og.content;
+            const desc = document.querySelector('meta[name="description"]');
+            if (desc && desc.content) return desc.content;
+            return '';
+        }
+        """
+        try:
+            content = page.evaluate(script)
+            if not isinstance(content, str) or not content.strip():
+                return ""
+            # Strip Instagram boilerplate patterns
+            cleaned = re.sub(
+                r"^\d+[\s,]*[Ll]ikes?,?\s*\d+[\s,]*[Cc]omments?\s*[-–—]\s*", "", content
+            )
+            cleaned = re.sub(r"\s*on Instagram:\s*", " ", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"^\S+\s+shared a (?:post|reel) on Instagram[.:]\s*", "", cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            return cleaned if len(cleaned) > 2 else ""
+        except Exception:
+            pass
+        return ""
 
     def _find_first_locator(self, page: Page, selectors: tuple[str, ...]):
         for selector in selectors:
