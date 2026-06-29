@@ -592,7 +592,7 @@ class MonitorFrame(ctk.CTkFrame):
                 self._preview_label.configure(image=ctk_img, text="")
                 self._preview_image = ctk_img  # prevent garbage collection
             elif self.app.scheduler.is_running:
-                self._preview_label.configure(text="等待瀏覽器截圖...", image="")
+                self._preview_label.configure(text="等待瀏覽器截圖...")
         except Exception:
             pass
 
@@ -601,6 +601,6 @@ class MonitorFrame(ctk.CTkFrame):
             self._preview_after_id = self.after(1500, self._poll_preview)
         else:
             self._preview_after_id = None
-            self._preview_label.configure(text="海巡未啟動", image="")
+            self._preview_label.configure(text="海巡未啟動")
             self._preview_image = None
             self.app.browser_manager.clear_screenshot()

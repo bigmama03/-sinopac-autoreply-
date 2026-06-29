@@ -148,7 +148,7 @@ class ReviewFrame(ctk.CTkFrame):
         card.grid(row=index, column=0, sticky="ew", pady=4, padx=2)
         card.grid_columnconfigure(0, weight=1)
 
-        card.bind("<Button-1>", lambda e, idx=index: self._select_card(idx))
+        card.bind("<Button-1>", lambda event, idx=index: self._select_card(idx))
 
         # Row 0: Post info
         info_frame = ctk.CTkFrame(card, fg_color="transparent")
