@@ -3,31 +3,34 @@
 import weakref
 import customtkinter as ctk
 
+from src.gui import theme as T
+
 
 class Toast(ctk.CTkFrame):
     """A small overlay that auto-dismisses after a few seconds."""
 
     _STYLES = {
-        "success": {"fg": "#4CAF50", "text": "#FFFFFF"},
-        "error": {"fg": "#F44336", "text": "#FFFFFF"},
-        "info": {"fg": "#2196F3", "text": "#FFFFFF"},
-        "warning": {"fg": "#FF9800", "text": "#FFFFFF"},
+        "success": {"fg": T.TEAL_500, "text": "#FFFFFF"},
+        "error": {"fg": T.ERROR, "text": "#FFFFFF"},
+        "info": {"fg": T.INFO, "text": "#FFFFFF"},
+        "warning": {"fg": T.WARNING, "text": "#FFFFFF"},
     }
 
     def __init__(self, parent, message: str, style: str = "success",
                  duration_ms: int = 2500):
         colors = self._STYLES.get(style, self._STYLES["info"])
-        super().__init__(parent, fg_color=colors["fg"], corner_radius=8)
+        super().__init__(parent, fg_color=colors["fg"],
+                         corner_radius=T.RADIUS_MD,
+                         border_width=1, border_color=colors["fg"])
 
         self._duration = duration_ms
         self._after_id = None
 
         ctk.CTkLabel(
             self, text=message, text_color=colors["text"],
-            font=ctk.CTkFont(size=13), wraplength=350,
-        ).pack(padx=16, pady=10)
+            font=T.font_body(), wraplength=350,
+        ).pack(padx=T.PAD_LG, pady=T.PAD_MD)
 
-        # Position at top-center of parent
         self.place(relx=0.5, y=10, anchor="n")
         self.lift()
 
@@ -48,7 +51,6 @@ class Toast(ctk.CTkFrame):
         super().destroy()
 
 
-# Use WeakValueDictionary to avoid keeping destroyed Toast objects alive
 _active_toasts: weakref.WeakValueDictionary[int, "Toast"] = weakref.WeakValueDictionary()
 
 

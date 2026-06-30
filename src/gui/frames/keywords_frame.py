@@ -5,6 +5,7 @@ import csv
 import customtkinter as ctk
 from tkinter import filedialog
 
+from src.gui import theme as T
 from src.gui.widgets.toast import show_toast
 
 try:
@@ -25,69 +26,79 @@ class KeywordsFrame(ctk.CTkFrame):
         self._all_keywords = []
         self._category_values = ["開戶", "手續費", "投資", "一般"]
 
-        title_row = ctk.CTkFrame(self, fg_color="transparent")
-        title_row.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        title_row.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            title_row,
-            text="關鍵字管理",
-            font=ctk.CTkFont(size=22, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
+        title_row = T.page_header(self, "關鍵字管理")
+        title_row.grid(row=0, column=0, sticky="ew", pady=(0, T.PAD_MD))
 
         self._count_label = ctk.CTkLabel(
-            title_row,
-            text="共 0 個關鍵字",
-            text_color="gray60",
+            title_row, text="共 0 個關鍵字",
+            text_color=T.TEXT_TERTIARY, font=T.font_small(),
         )
-        self._count_label.grid(row=0, column=1, sticky="e")
+        self._count_label.pack(side="right")
 
         btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        ctk.CTkButton(btn_row, text="匯入 CSV/Excel", command=self._import_file, width=150).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(
-            btn_row,
-            text="下載匯入範本",
-            command=self._download_template,
-            width=130,
-            fg_color="transparent",
-            border_width=1,
-            text_color=("gray10", "gray90"),
-        ).pack(side="left", padx=(0, 8))
+        btn_row.grid(row=1, column=0, sticky="ew", pady=(0, T.PAD_MD))
 
-        filter_row = ctk.CTkFrame(self, fg_color="transparent")
-        filter_row.grid(row=2, column=0, sticky="ew", pady=(0, 10))
-        filter_row.grid_columnconfigure(3, weight=1)
+        ctk.CTkButton(
+            btn_row, text="匯入 CSV/Excel", width=150,
+            **T.BTN_PRIMARY,
+            command=self._import_file,
+        ).pack(side="left", padx=(0, T.PAD_SM))
+
+        ctk.CTkButton(
+            btn_row, text="下載匯入範本", width=130,
+            **T.BTN_GHOST,
+            command=self._download_template,
+        ).pack(side="left", padx=(0, T.PAD_SM))
+
+        # Filter row
+        filter_row = ctk.CTkFrame(self, fg_color=T.BG_CARD, corner_radius=T.RADIUS_MD,
+                                  border_width=1, border_color=T.BORDER_SUBTLE)
+        filter_row.grid(row=2, column=0, sticky="ew", pady=(0, T.PAD_SM))
+
+        filter_inner = ctk.CTkFrame(filter_row, fg_color="transparent")
+        filter_inner.pack(fill="x", padx=T.PAD_MD, pady=T.PAD_SM)
 
         self._search_entry = ctk.CTkEntry(
-            filter_row,
-            width=250,
+            filter_inner, width=250,
             placeholder_text="搜尋關鍵字...",
+            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+            text_color=T.TEXT_PRIMARY,
         )
-        self._search_entry.grid(row=0, column=0, padx=(0, 8), sticky="w")
+        self._search_entry.pack(side="left", padx=(0, T.PAD_SM))
         self._search_entry.bind("<KeyRelease>", lambda _event: self._apply_filter())
 
         self._filter_category_var = ctk.StringVar(value="全部分類")
         self._filter_category_menu = ctk.CTkOptionMenu(
-            filter_row,
+            filter_inner,
             values=["全部分類", "開戶", "手續費", "投資", "一般"],
-            variable=self._filter_category_var,
-            width=140,
+            variable=self._filter_category_var, width=130,
             command=lambda _value: self._apply_filter(),
+            fg_color=T.NAVY_700, button_color=T.NAVY_600,
+            button_hover_color=T.NAVY_500,
+            dropdown_fg_color=T.BG_ELEVATED,
+            text_color=T.TEXT_PRIMARY,
         )
-        self._filter_category_menu.grid(row=0, column=1, sticky="w")
+        self._filter_category_menu.pack(side="left", padx=(0, T.PAD_SM))
 
         self._sort_var = ctk.StringVar(value="權重高→低")
         self._sort_menu = ctk.CTkOptionMenu(
-            filter_row,
+            filter_inner,
             values=["權重高→低", "權重低→高", "名稱 A→Z", "名稱 Z→A"],
-            variable=self._sort_var,
-            width=140,
+            variable=self._sort_var, width=130,
             command=lambda _value: self._apply_filter(),
+            fg_color=T.NAVY_700, button_color=T.NAVY_600,
+            button_hover_color=T.NAVY_500,
+            dropdown_fg_color=T.BG_ELEVATED,
+            text_color=T.TEXT_PRIMARY,
         )
-        self._sort_menu.grid(row=0, column=2, padx=(8, 0), sticky="w")
+        self._sort_menu.pack(side="left")
 
-        self._scroll_frame = ctk.CTkScrollableFrame(self)
+        self._scroll_frame = ctk.CTkScrollableFrame(
+            self, fg_color=T.BG_APP,
+            scrollbar_fg_color=T.BG_APP,
+            scrollbar_button_color=T.NAVY_600,
+            scrollbar_button_hover_color=T.NAVY_500,
+        )
         self._scroll_frame.grid(row=3, column=0, sticky="nsew")
         self._scroll_frame.grid_columnconfigure(0, weight=1)
 
@@ -161,30 +172,26 @@ class KeywordsFrame(ctk.CTkFrame):
         self.refresh()
 
     def _create_keyword_card(self, keyword, index: int) -> ctk.CTkFrame:
-        card = ctk.CTkFrame(self._scroll_frame)
-        card.grid(row=index, column=0, sticky="ew", pady=3, padx=2)
+        card = T.card_frame(self._scroll_frame,
+                            row=index, column=0, sticky="ew",
+                            pady=T.PAD_XS, padx=2)
         card.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            card,
-            text=keyword.keyword,
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", padx=(12, 8), pady=10)
+            card, text=keyword.keyword,
+            font=T.font_card_title(), text_color=T.TEXT_PRIMARY,
+        ).grid(row=0, column=0, sticky="w", padx=(T.PAD_MD, T.PAD_SM), pady=T.PAD_MD)
 
         ctk.CTkLabel(
-            card,
-            text=keyword.category or "一般",
-            font=ctk.CTkFont(size=11),
-            text_color=("blue", "#64B5F6"),
-        ).grid(row=0, column=1, sticky="w", padx=(0, 8), pady=10)
+            card, text=keyword.category or "一般",
+            font=T.font_small(), text_color=T.GOLD_500,
+        ).grid(row=0, column=1, sticky="w", padx=(0, T.PAD_SM), pady=T.PAD_MD)
 
         weight_label = ctk.CTkLabel(
-            card,
-            text=f"權重 {keyword.weight:.1f}",
-            text_color="gray60",
-            font=ctk.CTkFont(size=12),
+            card, text=f"權重 {keyword.weight:.1f}",
+            text_color=T.TEXT_TERTIARY, font=T.font_small(),
         )
-        weight_label.grid(row=0, column=2, sticky="w", padx=(0, 12), pady=10)
+        weight_label.grid(row=0, column=2, sticky="w", padx=(0, T.PAD_MD), pady=T.PAD_MD)
         weight_label.bind("<Enter>", lambda e, w=weight_label: w.configure(
             text=f"權重 {keyword.weight:.1f}（越高越優先匹配）"
         ))
@@ -193,16 +200,10 @@ class KeywordsFrame(ctk.CTkFrame):
         ))
 
         ctk.CTkButton(
-            card,
-            text="刪除",
-            width=60,
-            height=28,
-            fg_color="transparent",
-            border_width=1,
-            text_color=("red", "#EF5350"),
-            hover_color=("gray90", "gray20"),
+            card, text="刪除", width=60, height=28,
+            **T.BTN_GHOST_DANGER,
             command=lambda kid=keyword.id: self._delete_keyword(kid),
-        ).grid(row=0, column=3, sticky="e", padx=12, pady=8)
+        ).grid(row=0, column=3, sticky="e", padx=T.PAD_MD, pady=T.PAD_SM)
 
         return card
 
@@ -220,7 +221,6 @@ class KeywordsFrame(ctk.CTkFrame):
             and (category == "全部分類" or keyword.category == category)
         ]
 
-        # Sort (secondary key for deterministic tie-breaking)
         sort_mode = self._sort_var.get()
         if sort_mode == "權重高→低":
             filtered.sort(key=lambda k: (-k.weight, k.keyword.lower()))
@@ -244,10 +244,8 @@ class KeywordsFrame(ctk.CTkFrame):
         if not filtered:
             empty_text = "尚未建立關鍵字\n請點擊「匯入 CSV/Excel」按鈕" if total == 0 else "沒有符合條件的關鍵字"
             empty = ctk.CTkLabel(
-                self._scroll_frame,
-                text=empty_text,
-                text_color="gray50",
-                font=ctk.CTkFont(size=14),
+                self._scroll_frame, text=empty_text,
+                text_color=T.TEXT_TERTIARY, font=T.font_body(),
             )
             empty.grid(row=0, column=0, pady=40)
             self._keyword_widgets.append(empty)

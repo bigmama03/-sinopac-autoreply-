@@ -5,6 +5,7 @@ import json
 import customtkinter as ctk
 from tkinter import filedialog
 
+from src.gui import theme as T
 from src.gui.widgets.toast import show_toast
 
 try:
@@ -22,49 +23,60 @@ class LogsFrame(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
 
         # Title
-        ctk.CTkLabel(
-            self, text="稽核日誌",
-            font=ctk.CTkFont(size=22, weight="bold"),
-        ).grid(row=0, column=0, sticky="w", pady=(0, 10))
+        header = T.page_header(self, "稽核日誌")
+        header.grid(row=0, column=0, sticky="ew", pady=(0, T.PAD_MD))
 
         # Controls
-        ctrl_frame = ctk.CTkFrame(self, fg_color="transparent")
-        ctrl_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        ctrl_frame = ctk.CTkFrame(self, fg_color=T.BG_CARD, corner_radius=T.RADIUS_MD,
+                                  border_width=1, border_color=T.BORDER_SUBTLE)
+        ctrl_frame.grid(row=1, column=0, sticky="ew", pady=(0, T.PAD_SM))
 
-        ctk.CTkLabel(ctrl_frame, text="篩選:").pack(side="left")
+        ctrl_inner = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
+        ctrl_inner.pack(fill="x", padx=T.PAD_MD, pady=T.PAD_SM)
+
+        ctk.CTkLabel(ctrl_inner, text="篩選:", text_color=T.TEXT_SECONDARY,
+                     font=T.font_small()).pack(side="left")
         self._filter_var = ctk.StringVar(value="")
         self._filter_entry = ctk.CTkEntry(
-            ctrl_frame, textvariable=self._filter_var, width=200,
+            ctrl_inner, textvariable=self._filter_var, width=200,
             placeholder_text="輸入動作關鍵字...",
+            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+            text_color=T.TEXT_PRIMARY,
         )
-        self._filter_entry.pack(side="left", padx=5)
+        self._filter_entry.pack(side="left", padx=T.PAD_XS)
 
         ctk.CTkButton(
-            ctrl_frame, text="搜尋", width=60,
+            ctrl_inner, text="搜尋", width=60,
+            **T.BTN_GHOST_ACCENT,
             command=self.refresh,
-        ).pack(side="left", padx=5)
+        ).pack(side="left", padx=T.PAD_XS)
 
         self._clear_filter_btn = ctk.CTkButton(
-            ctrl_frame, text="清除篩選", width=80, height=28,
-            fg_color="transparent", border_width=1,
+            ctrl_inner, text="清除篩選", width=80, height=28,
+            **T.BTN_GHOST,
             command=self._clear_filter,
         )
-        self._clear_filter_btn.pack(side="left", padx=5)
+        self._clear_filter_btn.pack(side="left", padx=T.PAD_XS)
 
         ctk.CTkButton(
-            ctrl_frame, text="匯出稽核日誌", width=110,
-            fg_color="transparent", border_width=1,
+            ctrl_inner, text="匯出稽核日誌", width=110,
+            **T.BTN_GHOST,
             command=self._export_audit_csv,
         ).pack(side="right")
 
         ctk.CTkButton(
-            ctrl_frame, text="匯出回覆紀錄", width=110,
-            fg_color="transparent", border_width=1,
+            ctrl_inner, text="匯出回覆紀錄", width=110,
+            **T.BTN_GHOST,
             command=self._export_reply_csv,
-        ).pack(side="right", padx=(0, 8))
+        ).pack(side="right", padx=(0, T.PAD_SM))
 
-        # Log table (scrollable)
-        self._scroll_frame = ctk.CTkScrollableFrame(self)
+        # Log table
+        self._scroll_frame = ctk.CTkScrollableFrame(
+            self, fg_color=T.BG_APP,
+            scrollbar_fg_color=T.BG_APP,
+            scrollbar_button_color=T.NAVY_600,
+            scrollbar_button_hover_color=T.NAVY_500,
+        )
         self._scroll_frame.grid(row=2, column=0, sticky="nsew")
         self._scroll_frame.grid_columnconfigure(1, weight=1)
 
@@ -73,13 +85,12 @@ class LogsFrame(ctk.CTkFrame):
         for i, h in enumerate(headers):
             ctk.CTkLabel(
                 self._scroll_frame, text=h,
-                font=ctk.CTkFont(size=12, weight="bold"),
-            ).grid(row=0, column=i, sticky="w", padx=8, pady=4)
+                font=T.font_badge(), text_color=T.TEXT_TERTIARY,
+            ).grid(row=0, column=i, sticky="w", padx=T.PAD_SM, pady=T.PAD_XS)
 
         self._log_widgets: list[list] = []
 
     def refresh(self):
-        # Clear old rows
         for row_widgets in self._log_widgets:
             for w in row_widgets:
                 w.destroy()
@@ -92,7 +103,7 @@ class LogsFrame(ctk.CTkFrame):
             empty = ctk.CTkLabel(
                 self._scroll_frame,
                 text="尚無稽核日誌\n\n系統操作（啟動海巡、核准回覆、刪除等）都會自動記錄在這裡",
-                text_color="gray50", font=ctk.CTkFont(size=14),
+                text_color=T.TEXT_TERTIARY, font=T.font_body(),
                 justify="center",
             )
             empty.grid(row=1, column=0, columnspan=3, pady=40)
@@ -100,24 +111,23 @@ class LogsFrame(ctk.CTkFrame):
             return
 
         for i, log in enumerate(logs):
-            row_num = i + 1  # Skip header row
+            row_num = i + 1
             widgets = []
 
             ts_label = ctk.CTkLabel(
                 self._scroll_frame, text=(log.timestamp or "")[:19],
-                font=ctk.CTkFont(size=11), text_color="gray60",
+                font=T.font_small(), text_color=T.TEXT_TERTIARY,
             )
-            ts_label.grid(row=row_num, column=0, sticky="nw", padx=8, pady=1)
+            ts_label.grid(row=row_num, column=0, sticky="nw", padx=T.PAD_SM, pady=1)
             widgets.append(ts_label)
 
             action_label = ctk.CTkLabel(
                 self._scroll_frame, text=log.action,
-                font=ctk.CTkFont(size=11, weight="bold"),
+                font=T.font_badge(), text_color=T.GOLD_500,
             )
-            action_label.grid(row=row_num, column=1, sticky="nw", padx=8, pady=1)
+            action_label.grid(row=row_num, column=1, sticky="nw", padx=T.PAD_SM, pady=1)
             widgets.append(action_label)
 
-            # Expandable details: show truncated by default, click to expand
             raw_details = log.details or ""
             details_preview = self._format_details(raw_details, truncate=True)
             details_full = self._format_details(raw_details, truncate=False)
@@ -125,11 +135,11 @@ class LogsFrame(ctk.CTkFrame):
 
             details_label = ctk.CTkLabel(
                 self._scroll_frame, text=details_preview,
-                font=ctk.CTkFont(size=10), text_color="gray50",
+                font=T.font_caption(), text_color=T.TEXT_TERTIARY,
                 wraplength=500, justify="left",
                 cursor="hand2" if is_long else "",
             )
-            details_label.grid(row=row_num, column=2, sticky="nw", padx=8, pady=1)
+            details_label.grid(row=row_num, column=2, sticky="nw", padx=T.PAD_SM, pady=1)
             if is_long:
                 details_label._expanded = False
                 details_label.bind("<Button-1>", lambda e, lbl=details_label, short=details_preview, full=details_full: self._toggle_detail(lbl, short, full))
@@ -143,7 +153,6 @@ class LogsFrame(ctk.CTkFrame):
 
     @staticmethod
     def _format_details(raw: str, truncate: bool = True) -> str:
-        """Format JSON details for display."""
         if not raw:
             return ""
         try:

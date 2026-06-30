@@ -14,6 +14,7 @@ from src.core.ollama_judge import OllamaJudge
 from src.core.scheduler import PatrolScheduler
 from src.platforms.rate_limiter import PlatformRateLimiters
 from src.platforms.browser_manager import BrowserManager
+from src.gui import theme as T
 from config import APP_NAME_ZH, APP_VERSION, NEGATIVE_KEYWORDS
 
 logger = logging.getLogger(__name__)
@@ -64,19 +65,20 @@ class App(ctk.CTk):
             on_patrol_log=_patrol_log_cb,
         )
 
-        # Thread-safe message queue for background → GUI communication
+        # Thread-safe message queue for background -> GUI communication
         self.msg_queue: queue.Queue = queue.Queue(maxsize=500)
-        self._patrol_log_buffer: list[tuple[str, str]] = []  # buffer before monitor frame exists
-        self._shutting_down = False  # Flag for daemon threads to check
+        self._patrol_log_buffer: list[tuple[str, str]] = []
+        self._shutting_down = False
 
         # Window setup
         self.title(f"{APP_NAME_ZH} v{APP_VERSION}")
         self.geometry("1100x700")
         self.minsize(900, 600)
-        # Restore persisted appearance mode
-        saved_appearance = self.repo.get_setting("appearance_mode", "dark")
-        ctk.set_appearance_mode(saved_appearance)
+        # Dark-only UI — all theme tokens are single dark hex values
+        ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
+
+        self.configure(fg_color=T.BG_APP)
 
         # Layout: sidebar + content
         self.grid_columnconfigure(1, weight=1)
@@ -94,16 +96,36 @@ class App(ctk.CTk):
         self._badge_refresh_loop()
 
     def _build_sidebar(self):
-        sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
+        sidebar = ctk.CTkFrame(self, width=T.SIDEBAR_WIDTH, corner_radius=0,
+                               fg_color=T.BG_SIDEBAR, border_width=0)
         sidebar.grid(row=0, column=0, sticky="nsew")
-        sidebar.grid_rowconfigure(9, weight=1)  # Push bottom items down
+        sidebar.grid_rowconfigure(10, weight=1)  # Push bottom items down
 
-        # Title
-        title_label = ctk.CTkLabel(
-            sidebar, text="永豐金證券\n社群自動回覆",
-            font=ctk.CTkFont(size=16, weight="bold"),
-        )
-        title_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        # Brand area
+        brand_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        brand_frame.grid(row=0, column=0, padx=T.PAD_LG, pady=(T.PAD_XL, T.PAD_SM),
+                         sticky="ew")
+
+        # Gold accent line
+        accent_line = ctk.CTkFrame(brand_frame, height=2, fg_color=T.GOLD_500,
+                                   corner_radius=0)
+        accent_line.pack(fill="x", pady=(0, T.PAD_MD))
+
+        ctk.CTkLabel(
+            brand_frame, text="永豐金證券",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=T.TEXT_PRIMARY,
+        ).pack(anchor="w")
+
+        ctk.CTkLabel(
+            brand_frame, text="社群自動回覆系統",
+            font=ctk.CTkFont(size=12),
+            text_color=T.TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(2, 0))
+
+        # Separator
+        ctk.CTkFrame(sidebar, height=1, fg_color=T.BORDER_SUBTLE).grid(
+            row=1, column=0, sticky="ew", padx=T.PAD_LG, pady=(T.PAD_SM, T.PAD_SM))
 
         # Navigation buttons
         nav_items = [
@@ -121,14 +143,17 @@ class App(ctk.CTk):
         self._nav_badges: dict[str, ctk.CTkLabel] = {}
         for i, (label, name) in enumerate(nav_items):
             row_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
-            row_frame.grid(row=i + 1, column=0, padx=10, pady=2, sticky="ew")
+            row_frame.grid(row=i + 2, column=0, padx=T.PAD_SM, pady=1, sticky="ew")
             row_frame.grid_columnconfigure(0, weight=1)
 
             btn = ctk.CTkButton(
-                row_frame, text=label, height=40,
-                fg_color="transparent", text_color=("gray10", "gray90"),
-                hover_color=("gray70", "gray30"),
+                row_frame, text=label, height=T.SIDEBAR_BTN_HEIGHT,
+                fg_color="transparent",
+                text_color=T.TEXT_SECONDARY,
+                hover_color=T.NAVY_700,
                 anchor="w",
+                corner_radius=T.RADIUS_MD,
+                font=ctk.CTkFont(size=13),
                 command=lambda n=name: self._show_frame(n),
             )
             btn.grid(row=0, column=0, sticky="ew")
@@ -136,39 +161,32 @@ class App(ctk.CTk):
 
             # Badge placeholders for review queue and replies
             if name in ("review", "replies"):
-                badge_color = "#F44336" if name == "review" else "#FF9800"
+                badge_color = T.ERROR if name == "review" else T.WARNING
                 badge = ctk.CTkLabel(
-                    row_frame, text="", width=28, height=20,
-                    corner_radius=10, font=ctk.CTkFont(size=10, weight="bold"),
+                    row_frame, text="", width=26, height=18,
+                    corner_radius=T.RADIUS_PILL, font=T.font_badge(),
                     fg_color=badge_color, text_color="#FFFFFF",
                 )
-                badge.grid(row=0, column=1, padx=(0, 8))
-                badge.grid_remove()  # Hidden by default
+                badge.grid(row=0, column=1, padx=(0, T.PAD_SM))
+                badge.grid_remove()
                 self._nav_badges[name] = badge
 
-        # Appearance toggle
-        self._appearance_menu = ctk.CTkOptionMenu(
-            sidebar, values=["Dark", "Light", "System"],
-            width=100, height=28, font=ctk.CTkFont(size=11),
-            command=self._on_appearance_change,
-        )
-        # Restore appearance menu to match saved setting
-        mode_display = {"dark": "Dark", "light": "Light", "system": "System"}
-        saved_mode = self.repo.get_setting("appearance_mode", "dark")
-        self._appearance_menu.set(mode_display.get(saved_mode, "Dark"))
-        self._appearance_menu.grid(row=10, column=0, padx=20, pady=(5, 5))
+        # Bottom section
+        # Separator
+        ctk.CTkFrame(sidebar, height=1, fg_color=T.BORDER_SUBTLE).grid(
+            row=11, column=0, sticky="ew", padx=T.PAD_LG, pady=(T.PAD_SM, T.PAD_SM))
 
-        # Version at bottom
-        ver_label = ctk.CTkLabel(
+        # Version
+        ctk.CTkLabel(
             sidebar, text=f"v{APP_VERSION}",
-            font=ctk.CTkFont(size=11), text_color="gray50",
-        )
-        ver_label.grid(row=11, column=0, padx=20, pady=(0, 10))
+            font=ctk.CTkFont(size=10), text_color=T.TEXT_TERTIARY,
+        ).grid(row=13, column=0, padx=T.PAD_LG, pady=(0, T.PAD_SM))
 
     def _build_content_area(self):
         """Create the content container and all page frames."""
-        self.content_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.content_container.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.content_container = ctk.CTkFrame(self, fg_color=T.BG_APP,
+                                              corner_radius=0)
+        self.content_container.grid(row=0, column=1, sticky="nsew")
         self.content_container.grid_columnconfigure(0, weight=1)
         self.content_container.grid_rowconfigure(0, weight=1)
 
@@ -179,7 +197,7 @@ class App(ctk.CTk):
         """Lazy-load and return a frame by name."""
         if name not in self._frames:
             frame = self._create_frame(name)
-            frame.grid(row=0, column=0, sticky="nsew")
+            frame.grid(row=0, column=0, sticky="nsew", padx=T.PAD_LG, pady=T.PAD_LG)
             self._frames[name] = frame
         return self._frames[name]
 
@@ -210,30 +228,28 @@ class App(ctk.CTk):
             from src.gui.frames.settings_frame import SettingsFrame
             return SettingsFrame(self.content_container, self)
         else:
-            # Fallback placeholder
-            f = ctk.CTkFrame(self.content_container)
-            ctk.CTkLabel(f, text=f"Page: {name}").pack(pady=20)
+            f = ctk.CTkFrame(self.content_container, fg_color=T.BG_APP)
+            ctk.CTkLabel(f, text=f"Page: {name}",
+                         text_color=T.TEXT_PRIMARY).pack(pady=20)
             return f
 
     def _show_frame(self, name: str):
         """Switch visible content frame and highlight nav button."""
         frame = self._get_frame(name)
 
-        # Hide all other frames
         for f in self._frames.values():
             f.grid_remove()
         frame.grid()
 
-        # Refresh frame data if it has a refresh method
         if hasattr(frame, "refresh"):
             frame.refresh()
 
         # Highlight active nav button
         for btn_name, btn in self._nav_buttons.items():
             if btn_name == name:
-                btn.configure(fg_color=("gray75", "gray25"))
+                btn.configure(fg_color=T.NAVY_600, text_color=T.GOLD_500)
             else:
-                btn.configure(fg_color="transparent")
+                btn.configure(fg_color="transparent", text_color=T.TEXT_SECONDARY)
 
     def _poll_queue(self):
         """Process messages from background threads."""
@@ -257,11 +273,10 @@ class App(ctk.CTk):
         try:
             self.msg_queue.put_nowait(callback)
         except queue.Full:
-            pass  # drop callback if queue is full
+            pass
 
     def _update_sidebar_badges(self):
         """Update the pending count badges on review and replies nav items."""
-        # Review queue badge
         review_badge = self._nav_badges.get("review")
         if review_badge:
             count = self.repo.count_posts_by_status("pending")
@@ -271,7 +286,6 @@ class App(ctk.CTk):
             else:
                 review_badge.grid_remove()
 
-        # Pending replies badge
         replies_badge = self._nav_badges.get("replies")
         if replies_badge:
             pending_replies = self.repo.count_pending_replies()
@@ -288,12 +302,6 @@ class App(ctk.CTk):
         except Exception:
             pass
         self._badge_after_id = self.after(5000, self._badge_refresh_loop)
-
-    def _on_appearance_change(self, value: str):
-        mode_map = {"Dark": "dark", "Light": "light", "System": "system"}
-        mode = mode_map.get(value, "dark")
-        ctk.set_appearance_mode(mode)
-        self.repo.set_setting("appearance_mode", mode)
 
     def _create_ollama_judge(self) -> OllamaJudge:
         """Build an Ollama judge instance from current repository settings."""
@@ -319,7 +327,6 @@ class App(ctk.CTk):
 
     def _on_new_posts(self, count: int):
         """Called when new posts are detected by patrol."""
-        # Refresh current frame if it's dashboard, monitor, or review
         for name in ("dashboard", "monitor", "review"):
             if name in self._frames:
                 frame = self._frames[name]
@@ -328,7 +335,6 @@ class App(ctk.CTk):
 
         self._update_sidebar_badges()
 
-        # Desktop notification in semi_auto mode
         mode = self.repo.get_setting("reply_mode", "semi_auto")
         if mode == "semi_auto":
             self._send_notification(
@@ -342,7 +348,6 @@ class App(ctk.CTk):
             title=f"Shadowban 警告 — {platform.capitalize()}",
             message=f"偵測到 {hidden_count} 則回覆可能被隱藏，建議暫停 {platform.capitalize()} 的海巡",
         )
-        # Refresh dashboard to show updated status
         if "dashboard" in self._frames:
             frame = self._frames["dashboard"]
             if hasattr(frame, "refresh"):

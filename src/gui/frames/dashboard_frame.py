@@ -12,6 +12,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
+from src.gui import theme as T
+
 try:
     from CTkMessagebox import CTkMessagebox
 except ImportError:
@@ -26,14 +28,15 @@ class _ChannelSelectDialog(ctk.CTkToplevel):
         self.title("選擇平台")
         self.resizable(False, False)
         self.transient(parent)
+        self.configure(fg_color=T.BG_ELEVATED)
 
         container = ctk.CTkFrame(self, fg_color="transparent")
-        container.pack(fill="both", expand=True, padx=20, pady=20)
+        container.pack(fill="both", expand=True, padx=T.PAD_XL, pady=T.PAD_XL)
 
         ctk.CTkLabel(
             container, text="選擇要啟動海巡的平台",
-            font=ctk.CTkFont(size=16, weight="bold"),
-        ).pack(anchor="w", pady=(0, 12))
+            font=T.font_section(), text_color=T.TEXT_PRIMARY,
+        ).pack(anchor="w", pady=(0, T.PAD_MD))
 
         for platform_name in all_platforms:
             if platform_name in configured_platforms:
@@ -43,24 +46,30 @@ class _ChannelSelectDialog(ctk.CTkToplevel):
                     container,
                     text=platform_name.capitalize(),
                     variable=value,
-                    onvalue=True,
-                    offvalue=False,
-                ).pack(anchor="w", pady=4)
+                    onvalue=True, offvalue=False,
+                    text_color=T.TEXT_PRIMARY,
+                    fg_color=T.GOLD_500,
+                    hover_color=T.GOLD_400,
+                    checkmark_color=T.TEXT_INVERSE,
+                ).pack(anchor="w", pady=T.PAD_XS)
             else:
                 ctk.CTkLabel(
                     container,
                     text=f"{platform_name.capitalize()} (未設定)",
-                    text_color="gray50",
-                ).pack(anchor="w", pady=4)
+                    text_color=T.TEXT_TERTIARY,
+                ).pack(anchor="w", pady=T.PAD_XS)
 
         btn_row = ctk.CTkFrame(container, fg_color="transparent")
-        btn_row.pack(fill="x", pady=(16, 0))
+        btn_row.pack(fill="x", pady=(T.PAD_LG, 0))
 
         ctk.CTkButton(
-            btn_row, text="啟動", width=90, command=self._confirm,
-        ).pack(side="right", padx=(8, 0))
+            btn_row, text="啟動", width=90,
+            **T.BTN_SUCCESS,
+            command=self._confirm,
+        ).pack(side="right", padx=(T.PAD_SM, 0))
         ctk.CTkButton(
-            btn_row, text="取消", width=90, fg_color="gray50", hover_color="gray40",
+            btn_row, text="取消", width=90,
+            **T.BTN_GHOST,
             command=self._cancel,
         ).pack(side="right")
 
@@ -99,21 +108,6 @@ class DashboardFrame(ctk.CTkFrame):
     _PERIOD_MAP = {"日": "day", "週": "week", "月": "month"}
     _PLATFORM_MAP = {"全部": None, "Threads": "threads", "Facebook": "facebook", "Instagram": "instagram"}
     _RANGE_PRESETS = {"近7天": 7, "近14天": 14, "近30天": 30, "近90天": 90}
-    _PLATFORM_COLORS = {"threads": "#1DA1F2", "facebook": "#4267B2", "instagram": "#E1306C"}
-    _CHART_FONTS = [
-        "PingFang TC",
-        "Microsoft YaHei",
-        "Microsoft JhengHei",
-        "Noto Sans CJK TC",
-        "Arial Unicode MS",
-        "sans-serif",
-    ]
-    _FIGURE_BG = "#2b2b2b"
-    _AXIS_BG = "#323232"
-    _TEXT_COLOR = "#f2f2f2"
-    _MUTED_TEXT_COLOR = "#a8a8a8"
-    _SPINE_COLOR = "#6f6f6f"
-    _GRID_COLOR = "#4a4a4a"
     _PATROL_PLATFORMS = ["threads", "facebook", "instagram"]
     _PATROL_PLATFORM_LABELS = {
         "threads": "Threads",
@@ -133,15 +127,17 @@ class DashboardFrame(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
 
         self._scroll_canvas = tk.Canvas(
-            self, bg="#2b2b2b", highlightthickness=0, bd=0,
+            self, bg=T.BG_APP, highlightthickness=0, bd=0,
         )
-        self._scrollbar = ctk.CTkScrollbar(self, command=self._scroll_canvas.yview)
+        self._scrollbar = ctk.CTkScrollbar(self, command=self._scroll_canvas.yview,
+                                           fg_color=T.BG_APP,
+                                           button_color=T.NAVY_600,
+                                           button_hover_color=T.NAVY_500)
 
         self._scroll_canvas.grid(row=0, column=0, sticky="nsew")
         self._scrollbar.grid(row=0, column=1, sticky="ns")
         self._scroll_canvas.configure(yscrollcommand=self._scrollbar.set)
 
-        # Inner frame holds all dashboard content
         self._inner = ctk.CTkFrame(self._scroll_canvas, fg_color="transparent")
         self._canvas_window_id = self._scroll_canvas.create_window(
             (0, 0), window=self._inner, anchor="nw",
@@ -149,115 +145,127 @@ class DashboardFrame(ctk.CTkFrame):
 
         self._inner.bind("<Configure>", self._on_inner_configure)
         self._scroll_canvas.bind("<Configure>", self._on_canvas_configure)
-
-        # Mousewheel scrolling (bind/unbind on hover)
         self._scroll_canvas.bind("<Enter>", self._bind_mousewheel)
         self._scroll_canvas.bind("<Leave>", self._unbind_mousewheel)
 
-        # Inner grid
         self._inner.grid_columnconfigure((0, 1, 2), weight=1)
 
-        # ── Row 0: Title + patrol button ──
+        # ── Row 0: Title + patrol controls ──
         header = ctk.CTkFrame(self._inner, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 15))
+        header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, T.PAD_LG))
         header.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
             header, text="總覽儀表板",
-            font=ctk.CTkFont(size=22, weight="bold"),
+            font=T.font_title(), text_color=T.TEXT_PRIMARY,
         ).grid(row=0, column=0, sticky="w")
 
         btn_row = ctk.CTkFrame(header, fg_color="transparent")
         btn_row.grid(row=0, column=2, sticky="e")
 
         self._sending_btn = ctk.CTkButton(
-            btn_row, text="暫停發送", width=100, height=36,
-            fg_color="#FF9800", hover_color="#F57C00",
+            btn_row, text="暫停發送", width=100, height=34,
+            **T.BTN_WARNING,
             command=self._toggle_sending,
         )
-        self._sending_btn.pack(side="left", padx=(0, 8))
-        self._sending_btn.pack_forget()  # hidden until patrol starts
+        self._sending_btn.pack(side="left", padx=(0, T.PAD_SM))
+        self._sending_btn.pack_forget()
 
         self._patrol_btn = ctk.CTkButton(
-            btn_row, text="啟動海巡", width=120, height=36,
-            fg_color="#4CAF50", hover_color="#388E3C",
+            btn_row, text="啟動海巡", width=120, height=34,
+            **T.BTN_SUCCESS,
             command=self._toggle_patrol,
         )
         self._patrol_btn.pack(side="left")
 
         self._patrol_status = ctk.CTkLabel(
-            header, text="未啟動", text_color="gray50",
+            header, text="未啟動", text_color=T.TEXT_TERTIARY,
+            font=T.font_small(),
         )
-        self._patrol_status.grid(row=0, column=1, sticky="e", padx=10)
+        self._patrol_status.grid(row=0, column=1, sticky="e", padx=T.PAD_MD)
 
         self._live_counter = ctk.CTkLabel(
-            header, text="", text_color="gray50", font=ctk.CTkFont(size=11),
+            header, text="", text_color=T.TEXT_TERTIARY,
+            font=T.font_caption(),
         )
-        self._live_counter.grid(row=1, column=0, columnspan=3, sticky="e", padx=10)
+        self._live_counter.grid(row=1, column=0, columnspan=3, sticky="e", padx=T.PAD_MD)
 
         self._live_counter_after_id = None
 
         # ── Row 1: Stat cards ──
         self._cards: dict[str, ctk.CTkLabel] = {}
-        card_defs = [
-            ("pending_count", "待審核貼文", "0", "review"),
-            ("replied_today", "今日已回覆", "0", "replies"),
-            ("template_count", "文案數量", "0", "templates"),
+        card_configs = [
+            ("pending_count", "待審核貼文", "0", "review", T.WARNING),
+            ("replied_today", "今日已回覆", "0", "replies", T.TEAL_500),
+            ("template_count", "文案數量", "0", "templates", T.GOLD_500),
         ]
-        for i, (key, title, default, target) in enumerate(card_defs):
-            card = self._create_stat_card(title, default, target)
-            card["frame"].grid(row=1, column=i, padx=8, pady=8, sticky="nsew")
+        for i, (key, title, default, target, accent) in enumerate(card_configs):
+            card = self._create_stat_card(title, default, target, accent)
+            card["frame"].grid(row=1, column=i, padx=T.PAD_SM, pady=T.PAD_SM, sticky="nsew")
             self._cards[key] = card["value_label"]
 
-        # ── Row 2-3: Platform status + Mode (combined section) ──
-        self._create_section_title(self._inner, "平台連線狀態", row=2)
+        # ── Row 2-3: Platform status + Mode ──
+        T.section_title(self._inner, "平台連線狀態", row=2)
 
-        status_row = ctk.CTkFrame(self._inner, fg_color=("gray88", "gray17"), corner_radius=8)
-        status_row.grid(row=3, column=0, columnspan=3, sticky="ew", padx=4, pady=(0, 4))
+        status_row = T.card_frame(self._inner,
+                                  row=3, column=0, columnspan=3,
+                                  sticky="ew", padx=T.PAD_XS, pady=(0, T.PAD_XS))
         status_row.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
         self._platform_status: dict[str, ctk.CTkLabel] = {}
         platforms = [
-            ("threads", "Threads", "#1DA1F2"),
-            ("facebook", "Facebook", "#1877F2"),
-            ("instagram", "Instagram", "#E4405F"),
+            ("threads", "Threads", T.PLATFORM_THREADS),
+            ("facebook", "Facebook", T.PLATFORM_FACEBOOK),
+            ("instagram", "Instagram", T.PLATFORM_INSTAGRAM),
         ]
         for i, (key, label, accent) in enumerate(platforms):
             coming = key in self._COMING_SOON_PLATS
             cell = ctk.CTkFrame(status_row, fg_color="transparent")
-            cell.grid(row=0, column=i, padx=12, pady=10, sticky="nsew")
-            title_text = f"{label}（即將推出）" if coming else label
-            title_color = "gray50" if coming else accent
+            cell.grid(row=0, column=i, padx=T.PAD_MD, pady=T.PAD_MD, sticky="nsew")
+
+            # Platform indicator dot + name
+            name_frame = ctk.CTkFrame(cell, fg_color="transparent")
+            name_frame.pack(anchor="w")
+
+            title_text = f"{label}{'  (即將推出)' if coming else ''}"
+            title_color = T.TEXT_TERTIARY if coming else accent
             ctk.CTkLabel(
-                cell, text=title_text, font=ctk.CTkFont(size=13, weight="bold"),
-                text_color=title_color,
-            ).pack(anchor="w")
+                name_frame, text=title_text,
+                font=T.font_card_title(), text_color=title_color,
+            ).pack(side="left")
+
             status_text = "即將推出" if coming else "未設定"
-            status_label = ctk.CTkLabel(cell, text=status_text, text_color="gray50", font=ctk.CTkFont(size=12))
-            status_label.pack(anchor="w")
+            status_label = ctk.CTkLabel(
+                cell, text=status_text,
+                text_color=T.TEXT_TERTIARY, font=T.font_small(),
+            )
+            status_label.pack(anchor="w", pady=(T.PAD_XS, 0))
             self._platform_status[key] = status_label
 
-        # Mode in same row
+        # Mode cell
         mode_cell = ctk.CTkFrame(status_row, fg_color="transparent")
-        mode_cell.grid(row=0, column=3, padx=12, pady=10, sticky="nsew")
+        mode_cell.grid(row=0, column=3, padx=T.PAD_MD, pady=T.PAD_MD, sticky="nsew")
         ctk.CTkLabel(
-            mode_cell, text="目前模式", font=ctk.CTkFont(size=13, weight="bold"),
+            mode_cell, text="目前模式",
+            font=T.font_card_title(), text_color=T.TEXT_SECONDARY,
         ).pack(anchor="w")
         self._mode_label = ctk.CTkLabel(
-            mode_cell, text="半自動", font=ctk.CTkFont(size=14),
-            text_color=("green", "#4CAF50"),
+            mode_cell, text="半自動",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=T.TEAL_500,
         )
-        self._mode_label.pack(anchor="w")
+        self._mode_label.pack(anchor="w", pady=(T.PAD_XS, 0))
 
-        # ── Row 4: Chart section ──
-        self._create_section_title(self._inner, "回覆趨勢", row=4)
+        # ── Row 4-5: Chart section ──
+        T.section_title(self._inner, "回覆趨勢", row=4)
 
-        chart_header = ctk.CTkFrame(self._inner, fg_color=("gray88", "gray17"), corner_radius=8)
-        chart_header.grid(row=5, column=0, columnspan=3, sticky="ew", padx=4, pady=(0, 4))
-        chart_header.grid_columnconfigure(0, weight=1)
+        chart_card = T.card_frame(self._inner,
+                                  row=5, column=0, columnspan=3,
+                                  sticky="ew", padx=T.PAD_XS, pady=(0, T.PAD_XS))
+        chart_card.grid_columnconfigure(0, weight=1)
 
-        row0 = ctk.CTkFrame(chart_header, fg_color="transparent")
-        row0.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 0))
+        row0 = ctk.CTkFrame(chart_card, fg_color="transparent")
+        row0.grid(row=0, column=0, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_MD, 0))
         row0.grid_columnconfigure(1, weight=1)
 
         controls = ctk.CTkFrame(row0, fg_color="transparent")
@@ -266,9 +274,15 @@ class DashboardFrame(ctk.CTkFrame):
         self._period_seg = ctk.CTkSegmentedButton(
             controls, values=["日", "週", "月"],
             command=self._on_period_change,
+            fg_color=T.NAVY_600, selected_color=T.GOLD_500,
+            selected_hover_color=T.GOLD_400,
+            unselected_color=T.NAVY_700,
+            unselected_hover_color=T.NAVY_500,
+            text_color=T.TEXT_PRIMARY,
+            text_color_disabled=T.TEXT_TERTIARY,
         )
         self._period_seg.set("日")
-        self._period_seg.pack(side="left", padx=(0, 12))
+        self._period_seg.pack(side="left", padx=(0, T.PAD_MD))
 
         self._chart_platform_var = ctk.StringVar(value="全部")
         ctk.CTkOptionMenu(
@@ -276,41 +290,68 @@ class DashboardFrame(ctk.CTkFrame):
             variable=self._chart_platform_var,
             command=self._on_chart_filter_change,
             width=120,
+            fg_color=T.NAVY_700, button_color=T.NAVY_600,
+            button_hover_color=T.NAVY_500,
+            dropdown_fg_color=T.BG_ELEVATED,
+            text_color=T.TEXT_PRIMARY,
         ).pack(side="left")
 
         # Date range controls
-        row1 = ctk.CTkFrame(chart_header, fg_color="transparent")
-        row1.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 8))
+        row1 = ctk.CTkFrame(chart_card, fg_color="transparent")
+        row1.grid(row=1, column=0, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_SM, T.PAD_SM))
 
         today = date.today()
         default_start = (today - timedelta(days=6)).strftime("%Y-%m-%d")
         default_end = today.strftime("%Y-%m-%d")
 
-        ctk.CTkLabel(row1, text="起始", font=ctk.CTkFont(size=12)).pack(side="left")
+        ctk.CTkLabel(row1, text="起始", font=T.font_small(),
+                     text_color=T.TEXT_SECONDARY).pack(side="left")
         self._start_date_var = ctk.StringVar(value=default_start)
-        self._start_entry = ctk.CTkEntry(row1, textvariable=self._start_date_var, width=100, placeholder_text="YYYY-MM-DD")
-        self._start_entry.pack(side="left", padx=(4, 8))
+        self._start_entry = ctk.CTkEntry(
+            row1, textvariable=self._start_date_var, width=100,
+            placeholder_text="YYYY-MM-DD",
+            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+            text_color=T.TEXT_PRIMARY,
+        )
+        self._start_entry.pack(side="left", padx=(T.PAD_XS, T.PAD_SM))
 
-        ctk.CTkLabel(row1, text="結束", font=ctk.CTkFont(size=12)).pack(side="left")
+        ctk.CTkLabel(row1, text="結束", font=T.font_small(),
+                     text_color=T.TEXT_SECONDARY).pack(side="left")
         self._end_date_var = ctk.StringVar(value=default_end)
-        self._end_entry = ctk.CTkEntry(row1, textvariable=self._end_date_var, width=100, placeholder_text="YYYY-MM-DD")
-        self._end_entry.pack(side="left", padx=(4, 12))
+        self._end_entry = ctk.CTkEntry(
+            row1, textvariable=self._end_date_var, width=100,
+            placeholder_text="YYYY-MM-DD",
+            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+            text_color=T.TEXT_PRIMARY,
+        )
+        self._end_entry.pack(side="left", padx=(T.PAD_XS, T.PAD_MD))
 
-        ctk.CTkButton(row1, text="套用", width=50, height=28, command=self._on_date_apply).pack(side="left", padx=(0, 12))
+        ctk.CTkButton(
+            row1, text="套用", width=50, height=28,
+            **T.BTN_GHOST_ACCENT,
+            command=self._on_date_apply,
+        ).pack(side="left", padx=(0, T.PAD_MD))
 
         self._range_seg = ctk.CTkSegmentedButton(
             row1, values=list(self._RANGE_PRESETS.keys()),
             command=self._on_range_preset,
+            fg_color=T.NAVY_600, selected_color=T.GOLD_500,
+            selected_hover_color=T.GOLD_400,
+            unselected_color=T.NAVY_700,
+            unselected_hover_color=T.NAVY_500,
+            text_color=T.TEXT_PRIMARY,
         )
         self._range_seg.set("近7天")
         self._range_seg.pack(side="left")
 
-        # Chart (inside chart_header container)
+        # Chart canvas
         self._fig = Figure(figsize=(8, 3), dpi=100)
-        self._fig.set_facecolor(self._FIGURE_BG)
+        self._fig.set_facecolor(T.CHART_BG)
         self._ax = self._fig.add_subplot(111)
-        self._chart_container = tk.Frame(chart_header, bg="#2b2b2b", highlightthickness=0, height=250)
-        self._chart_container.grid(row=2, column=0, sticky="ew", padx=4, pady=(0, 6))
+        self._chart_container = tk.Frame(chart_card, bg=T.CHART_BG,
+                                         highlightthickness=0, height=250)
+        self._chart_container.grid(row=2, column=0, sticky="ew",
+                                   padx=T.PAD_XS, pady=(0, T.PAD_SM))
         self._chart_container.grid_propagate(False)
         self._chart_container.grid_columnconfigure(0, weight=1)
         self._chart_container.grid_rowconfigure(0, weight=1)
@@ -323,10 +364,12 @@ class DashboardFrame(ctk.CTkFrame):
         self._update_chart()
 
         # ── Row 6-7: Patrol history ──
-        self._create_section_title(self._inner, "海巡紀錄", row=6)
+        T.section_title(self._inner, "海巡紀錄", row=6)
 
-        self._session_container = ctk.CTkFrame(self._inner, fg_color=("gray88", "gray17"), corner_radius=8)
-        self._session_container.grid(row=7, column=0, columnspan=3, sticky="ew", padx=4, pady=(0, 20))
+        self._session_container = T.card_frame(self._inner,
+                                               row=7, column=0, columnspan=3,
+                                               sticky="ew", padx=T.PAD_XS,
+                                               pady=(0, T.PAD_XL))
         self._session_container.grid_columnconfigure(0, weight=1)
         self._session_widgets: list[ctk.CTkFrame] = []
 
@@ -336,7 +379,6 @@ class DashboardFrame(ctk.CTkFrame):
         self._scroll_canvas.configure(scrollregion=self._scroll_canvas.bbox("all"))
 
     def _on_canvas_configure(self, event):
-        # Match inner frame width to canvas width
         self._scroll_canvas.itemconfigure(self._canvas_window_id, width=event.width)
 
     def _bind_mousewheel(self, event):
@@ -373,51 +415,54 @@ class DashboardFrame(ctk.CTkFrame):
 
     # ── UI helpers ──
 
-    def _create_section_title(self, parent, title: str, row: int):
-        """Section title with left accent bar."""
-        container = ctk.CTkFrame(parent, fg_color="transparent")
-        container.grid(row=row, column=0, columnspan=3, sticky="ew", pady=(16, 6), padx=4)
-        accent = ctk.CTkFrame(container, width=4, height=20, fg_color=("#2196F3", "#64B5F6"), corner_radius=2)
-        accent.pack(side="left", padx=(0, 8))
-        ctk.CTkLabel(
-            container, text=title,
-            font=ctk.CTkFont(size=15, weight="bold"),
-        ).pack(side="left")
-
-    def _create_stat_card(self, title: str, value: str, target: str = "") -> dict:
+    def _create_stat_card(self, title: str, value: str, target: str = "",
+                          accent_color: str = T.GOLD_500) -> dict:
         is_clickable = bool(target)
         frame = ctk.CTkFrame(
             self._inner,
+            fg_color=T.BG_CARD,
+            corner_radius=T.RADIUS_LG,
+            border_width=1,
+            border_color=T.BORDER_SUBTLE,
             cursor="hand2" if is_clickable else "",
-            border_width=1 if is_clickable else 0,
-            border_color=("gray70", "gray40"),
         )
-        title_label = ctk.CTkLabel(frame, text=title, font=ctk.CTkFont(size=12), text_color="gray60")
-        title_label.pack(pady=(12, 0))
-        value_label = ctk.CTkLabel(frame, text=value, font=ctk.CTkFont(size=32, weight="bold"))
-        value_label.pack(pady=(2, 4))
+
+        # Accent top bar
+        accent_bar = ctk.CTkFrame(frame, height=3, fg_color=accent_color,
+                                  corner_radius=0)
+        accent_bar.pack(fill="x", side="top")
+
+        body = ctk.CTkFrame(frame, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=T.PAD_LG, pady=(T.PAD_SM, T.PAD_LG))
+
+        title_label = ctk.CTkLabel(
+            body, text=title, font=T.font_small(),
+            text_color=T.TEXT_SECONDARY,
+        )
+        title_label.pack(anchor="w")
+
+        value_label = ctk.CTkLabel(
+            body, text=value, font=T.font_stat(),
+            text_color=T.TEXT_PRIMARY,
+        )
+        value_label.pack(anchor="w", pady=(T.PAD_XS, 0))
 
         if is_clickable:
             hint = ctk.CTkLabel(
-                frame, text="查看 →", font=ctk.CTkFont(size=10),
-                text_color=("#2196F3", "#64B5F6"),
+                body, text="查看 →", font=T.font_caption(),
+                text_color=T.GOLD_500,
             )
-            hint.pack(pady=(0, 10))
-
-            hover_bg = ("gray78", "gray30")
-            normal_bg = ("gray86", "gray17")
+            hint.pack(anchor="w", pady=(T.PAD_XS, 0))
 
             def on_enter(e):
-                frame.configure(fg_color=hover_bg)
+                frame.configure(fg_color=T.BG_CARD_HOVER)
             def on_leave(e):
-                frame.configure(fg_color=normal_bg)
+                frame.configure(fg_color=T.BG_CARD)
 
-            for widget in (frame, title_label, value_label, hint):
+            for widget in (frame, body, title_label, value_label, hint, accent_bar):
                 widget.bind("<Button-1>", lambda e, t=target: self.app._show_frame(t))
                 widget.bind("<Enter>", on_enter)
                 widget.bind("<Leave>", on_leave)
-        else:
-            ctk.CTkFrame(frame, height=10, fg_color="transparent").pack()  # spacer
 
         return {"frame": frame, "value_label": value_label}
 
@@ -485,16 +530,16 @@ class DashboardFrame(ctk.CTkFrame):
         scheduler = self.app.scheduler
         if scheduler.is_sending_paused:
             self._sending_btn.configure(
-                text="開始發送", fg_color="#4CAF50", hover_color="#388E3C",
+                text="開始發送", **T.BTN_SUCCESS,
             )
         else:
             self._sending_btn.configure(
-                text="暫停發送", fg_color="#FF9800", hover_color="#F57C00",
+                text="暫停發送", **T.BTN_WARNING,
             )
 
     def _update_patrol_ui(self):
         if self.app.scheduler.is_running:
-            self._patrol_btn.configure(text="停止海巡", fg_color="#F44336", hover_color="#D32F2F")
+            self._patrol_btn.configure(text="停止海巡", **T.BTN_DANGER)
             active_platforms = getattr(self.app.scheduler, "active_platforms", None)
             status_text = "海巡中"
             if active_platforms and set(active_platforms) != set(self._PATROL_PLATFORMS):
@@ -503,36 +548,31 @@ class DashboardFrame(ctk.CTkFrame):
                     for platform in active_platforms
                 ]
                 status_text = f"海巡中 ({', '.join(labels)})"
-            self._patrol_status.configure(text=status_text, text_color=("#4CAF50", "#66BB6A"))
-            # Show sending toggle button
-            self._sending_btn.pack(side="left", padx=(0, 8), before=self._patrol_btn)
+            self._patrol_status.configure(text=status_text, text_color=T.TEAL_500)
+            self._sending_btn.pack(side="left", padx=(0, T.PAD_SM), before=self._patrol_btn)
             self._update_sending_btn()
-            # Show live session counts
             self._refresh_live_counter()
-            # Start auto-refresh loop for live counter
             self._start_live_counter_loop()
         else:
-            self._patrol_btn.configure(text="啟動海巡", fg_color="#4CAF50", hover_color="#388E3C")
-            self._patrol_status.configure(text="未啟動", text_color="gray50")
+            self._patrol_btn.configure(text="啟動海巡", **T.BTN_SUCCESS)
+            self._patrol_status.configure(text="未啟動", text_color=T.TEXT_TERTIARY)
             self._live_counter.configure(text="")
             self._sending_btn.pack_forget()
             self._stop_live_counter_loop()
 
     def _refresh_live_counter(self):
-        """Update the live session counter display."""
         if self._destroyed:
             return
         session = self.app.repo.get_active_patrol_session()
         if session:
             self._live_counter.configure(
                 text=f"本次偵測 {session.total_detected} 筆 / 回覆 {session.total_replied} 筆",
-                text_color=("#4CAF50", "#66BB6A"),
+                text_color=T.TEAL_400,
             )
         else:
             self._live_counter.configure(text="")
 
     def _start_live_counter_loop(self):
-        """Auto-refresh live counter every 10 seconds while patrol is running."""
         self._stop_live_counter_loop()
         if self._destroyed or not self.app.scheduler.is_running:
             return
@@ -592,13 +632,13 @@ class DashboardFrame(ctk.CTkFrame):
 
         ax = self._ax
         ax.clear()
-        self._fig.set_facecolor(self._FIGURE_BG)
-        ax.set_facecolor(self._AXIS_BG)
+        self._fig.set_facecolor(T.CHART_BG)
+        ax.set_facecolor(T.CHART_AXIS_BG)
 
         if not stats:
             ax.text(
                 0.5, 0.5, "尚無回覆資料", ha="center", va="center",
-                color=self._MUTED_TEXT_COLOR, fontsize=14, transform=ax.transAxes,
+                color=T.TEXT_TERTIARY, fontsize=14, transform=ax.transAxes,
             )
             ax.set_xticks([])
             ax.set_yticks([])
@@ -608,13 +648,18 @@ class DashboardFrame(ctk.CTkFrame):
             return
 
         all_labels = sorted(set(s["label"] for s in stats))
+        platform_colors = {
+            "threads": T.PLATFORM_THREADS,
+            "facebook": T.PLATFORM_FACEBOOK,
+            "instagram": T.PLATFORM_INSTAGRAM,
+        }
 
         if platform:
             counts = []
             for label in all_labels:
                 c = sum(s["count"] for s in stats if s["label"] == label)
                 counts.append(c)
-            color = self._PLATFORM_COLORS.get(platform, "#1DA1F2")
+            color = platform_colors.get(platform, T.GOLD_500)
             ax.bar(range(len(all_labels)), counts, color=color, alpha=0.85)
         else:
             plats = ["threads", "facebook", "instagram"]
@@ -624,15 +669,14 @@ class DashboardFrame(ctk.CTkFrame):
                 for label in all_labels:
                     c = sum(s["count"] for s in stats if s["label"] == label and s["platform"] == plat)
                     counts.append(c)
-                color = self._PLATFORM_COLORS.get(plat, "gray")
-                ax.bar(range(len(all_labels)), counts, bottom=bottom, color=color, alpha=0.85, label=plat.capitalize())
+                color = platform_colors.get(plat, T.TEXT_TERTIARY)
+                ax.bar(range(len(all_labels)), counts, bottom=bottom,
+                       color=color, alpha=0.85, label=plat.capitalize())
                 bottom = [b + c for b, c in zip(bottom, counts)]
             legend = ax.legend(
-                loc="upper left",
-                fontsize=8,
-                facecolor=self._FIGURE_BG,
-                edgecolor=self._SPINE_COLOR,
-                labelcolor=self._TEXT_COLOR,
+                loc="upper left", fontsize=8,
+                facecolor=T.CHART_BG, edgecolor=T.CHART_SPINE,
+                labelcolor=T.CHART_TEXT,
             )
             if legend:
                 legend.get_frame().set_alpha(0.95)
@@ -659,22 +703,21 @@ class DashboardFrame(ctk.CTkFrame):
         return [lb.replace("-", "/") for lb in labels]
 
     def _style_axis(self, ax):
-        ax.set_facecolor(self._AXIS_BG)
-        ax.tick_params(colors=self._TEXT_COLOR, labelsize=8)
+        ax.set_facecolor(T.CHART_AXIS_BG)
+        ax.tick_params(colors=T.CHART_TEXT, labelsize=8)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
-        ax.spines["bottom"].set_color(self._SPINE_COLOR)
-        ax.spines["left"].set_color(self._SPINE_COLOR)
-        ax.xaxis.label.set_color(self._TEXT_COLOR)
-        ax.yaxis.label.set_color(self._TEXT_COLOR)
-        ax.title.set_color(self._TEXT_COLOR)
-        ax.grid(axis="y", color=self._GRID_COLOR, alpha=0.35, linewidth=0.8)
+        ax.spines["bottom"].set_color(T.CHART_SPINE)
+        ax.spines["left"].set_color(T.CHART_SPINE)
+        ax.xaxis.label.set_color(T.CHART_TEXT)
+        ax.yaxis.label.set_color(T.CHART_TEXT)
+        ax.title.set_color(T.CHART_TEXT)
+        ax.grid(axis="y", color=T.CHART_GRID, alpha=0.35, linewidth=0.8)
         ax.set_axisbelow(True)
 
     # ── Patrol sessions ──
 
     def _update_sessions(self):
-        """Refresh the patrol session history list."""
         for w in self._session_widgets:
             w.destroy()
         self._session_widgets.clear()
@@ -683,46 +726,46 @@ class DashboardFrame(ctk.CTkFrame):
         if not sessions:
             empty = ctk.CTkLabel(
                 self._session_container, text="尚無海巡紀錄",
-                text_color="gray50", font=ctk.CTkFont(size=12),
+                text_color=T.TEXT_TERTIARY, font=T.font_body(),
             )
-            empty.grid(row=0, column=0, pady=10)
+            empty.grid(row=0, column=0, pady=T.PAD_MD)
             self._session_widgets.append(empty)
             return
 
         # Header
         hdr = ctk.CTkFrame(self._session_container, fg_color="transparent")
-        hdr.grid(row=0, column=0, sticky="ew", padx=4, pady=(2, 4))
+        hdr.grid(row=0, column=0, sticky="ew", padx=T.PAD_XS, pady=(T.PAD_XS, T.PAD_XS))
         for col, (text, w) in enumerate([
             ("狀態", 60), ("開始時間", 130), ("結束時間", 130),
             ("平台", 140), ("偵測", 50), ("回覆", 50), ("持續時間", 80),
         ]):
             ctk.CTkLabel(
                 hdr, text=text, width=w,
-                font=ctk.CTkFont(size=11, weight="bold"), text_color="gray60",
+                font=T.font_badge(), text_color=T.TEXT_TERTIARY,
             ).grid(row=0, column=col, padx=2, sticky="w")
         self._session_widgets.append(hdr)
 
         for i, s in enumerate(sessions):
             row = ctk.CTkFrame(self._session_container, fg_color="transparent")
-            row.grid(row=i + 1, column=0, sticky="ew", padx=4, pady=1)
+            row.grid(row=i + 1, column=0, sticky="ew", padx=T.PAD_XS, pady=1)
 
             if s.status == "running":
-                status_text, status_color = "進行中", ("#4CAF50", "#66BB6A")
+                status_text, status_color = "進行中", T.TEAL_500
             else:
-                status_text, status_color = "已結束", ("gray50", "gray60")
+                status_text, status_color = "已結束", T.TEXT_TERTIARY
             ctk.CTkLabel(
                 row, text=status_text, width=60,
-                font=ctk.CTkFont(size=11), text_color=status_color,
+                font=T.font_small(), text_color=status_color,
             ).grid(row=0, column=0, padx=2, sticky="w")
 
             ctk.CTkLabel(
                 row, text=(s.started_at or "")[:16], width=130,
-                font=ctk.CTkFont(size=11),
+                font=T.font_small(), text_color=T.TEXT_SECONDARY,
             ).grid(row=0, column=1, padx=2, sticky="w")
 
             ctk.CTkLabel(
                 row, text=(s.stopped_at or "-")[:16], width=130,
-                font=ctk.CTkFont(size=11), text_color="gray50",
+                font=T.font_small(), text_color=T.TEXT_TERTIARY,
             ).grid(row=0, column=2, padx=2, sticky="w")
 
             try:
@@ -732,23 +775,23 @@ class DashboardFrame(ctk.CTkFrame):
             plat_text = ", ".join(p.capitalize() for p in plats) if plats else "-"
             ctk.CTkLabel(
                 row, text=plat_text, width=140,
-                font=ctk.CTkFont(size=11),
+                font=T.font_small(), text_color=T.TEXT_SECONDARY,
             ).grid(row=0, column=3, padx=2, sticky="w")
 
             ctk.CTkLabel(
                 row, text=str(s.total_detected), width=50,
-                font=ctk.CTkFont(size=11),
+                font=T.font_small(), text_color=T.TEXT_PRIMARY,
             ).grid(row=0, column=4, padx=2, sticky="w")
 
             ctk.CTkLabel(
                 row, text=str(s.total_replied), width=50,
-                font=ctk.CTkFont(size=11),
+                font=T.font_small(), text_color=T.TEXT_PRIMARY,
             ).grid(row=0, column=5, padx=2, sticky="w")
 
             duration = self._calc_duration(s.started_at, s.stopped_at)
             ctk.CTkLabel(
                 row, text=duration, width=80,
-                font=ctk.CTkFont(size=11), text_color="gray50",
+                font=T.font_small(), text_color=T.TEXT_TERTIARY,
             ).grid(row=0, column=6, padx=2, sticky="w")
 
             self._session_widgets.append(row)
@@ -774,7 +817,7 @@ class DashboardFrame(ctk.CTkFrame):
             return "-"
 
     def _configure_matplotlib(self):
-        plt.rcParams["font.sans-serif"] = self._CHART_FONTS
+        plt.rcParams["font.sans-serif"] = T.CHART_FONTS
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["axes.unicode_minus"] = False
 
@@ -812,17 +855,17 @@ class DashboardFrame(ctk.CTkFrame):
         bm = self.app.browser_manager
         for plat_key, label in self._platform_status.items():
             if plat_key in self._COMING_SOON_PLATS:
-                continue  # keep "即將推出" text
+                continue
             config = repo.get_platform_config(plat_key)
             has_session = bm.has_session(plat_key)
             if config and config.is_enabled and has_session:
-                label.configure(text="已登入", text_color=("#4CAF50", "#66BB6A"))
+                label.configure(text="已登入", text_color=T.TEAL_500)
             else:
-                label.configure(text="未設定", text_color="gray50")
+                label.configure(text="未設定", text_color=T.TEXT_TERTIARY)
 
         mode = repo.get_setting("reply_mode", "semi_auto")
         mode_text = "半自動" if mode == "semi_auto" else "全自動"
-        mode_color = ("#4CAF50", "#66BB6A") if mode == "semi_auto" else ("#FF9800", "#FFA726")
+        mode_color = T.TEAL_500 if mode == "semi_auto" else T.WARNING
         self._mode_label.configure(text=mode_text, text_color=mode_color)
 
         self._update_patrol_ui()

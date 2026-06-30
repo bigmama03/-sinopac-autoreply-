@@ -3,6 +3,8 @@
 import logging
 import threading
 import customtkinter as ctk
+
+from src.gui import theme as T
 from src.gui.widgets.toast import show_toast
 
 logger = logging.getLogger(__name__)
@@ -23,7 +25,12 @@ class SettingsFrame(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
 
         # Scrollable content
-        scroll = ctk.CTkScrollableFrame(self)
+        scroll = ctk.CTkScrollableFrame(
+            self, fg_color=T.BG_APP,
+            scrollbar_fg_color=T.BG_APP,
+            scrollbar_button_color=T.NAVY_600,
+            scrollbar_button_hover_color=T.NAVY_500,
+        )
         scroll.grid(row=0, column=0, sticky="nsew")
         scroll.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -34,28 +41,42 @@ class SettingsFrame(ctk.CTkFrame):
         self._browser_test_labels: dict[str, ctk.CTkLabel] = {}
         row = 0
 
+        # ── Page title ──
+        ctk.CTkLabel(
+            scroll, text="設定",
+            font=T.font_title(), text_color=T.TEXT_PRIMARY,
+        ).grid(row=row, column=0, sticky="w", padx=T.PAD_MD, pady=(0, T.PAD_LG))
+        row += 1
+
         # ── Mode Toggle ──
         row = self._add_section_title(scroll, "回覆模式", row)
         self._mode_switch_var = ctk.StringVar(value="0")
         mode_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        mode_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
-        ctk.CTkLabel(mode_frame, text="半自動").pack(side="left")
+        mode_frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=T.PAD_XS)
+        ctk.CTkLabel(mode_frame, text="半自動",
+                     text_color=T.TEXT_SECONDARY).pack(side="left")
         self._mode_switch = ctk.CTkSwitch(
             mode_frame, text="全自動", variable=self._mode_switch_var,
             onvalue="1", offvalue="0",
+            fg_color=T.NAVY_600, progress_color=T.GOLD_500,
+            button_color=T.TEXT_PRIMARY, button_hover_color=T.GOLD_400,
+            text_color=T.TEXT_SECONDARY,
         )
-        self._mode_switch.pack(side="left", padx=10)
+        self._mode_switch.pack(side="left", padx=T.PAD_MD)
         row += 1
 
-        # ── Browser Visible Toggle (debug) ──
+        # ── Browser Visible Toggle ──
         visible_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        visible_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
+        visible_frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=T.PAD_XS)
         self._visible_switch_var = ctk.StringVar(value="0")
         self._visible_switch = ctk.CTkSwitch(
             visible_frame, text="顯示海巡瀏覽器視窗（除錯用）",
             variable=self._visible_switch_var,
             onvalue="1", offvalue="0",
             command=self._on_browser_visible_change,
+            fg_color=T.NAVY_600, progress_color=T.GOLD_500,
+            button_color=T.TEXT_PRIMARY, button_hover_color=T.GOLD_400,
+            text_color=T.TEXT_SECONDARY,
         )
         self._visible_switch.pack(side="left")
         row += 1
@@ -71,50 +92,39 @@ class SettingsFrame(ctk.CTkFrame):
             row = self._add_section_title(scroll, title + suffix, row, muted=coming)
 
             platform_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-            platform_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
+            platform_frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=T.PAD_XS)
 
             status_label = ctk.CTkLabel(
-                platform_frame, text="未登入", text_color=("gray50", "gray60"),
+                platform_frame, text="未登入", text_color=T.TEXT_TERTIARY,
+                font=T.font_small(),
             )
-            status_label.pack(side="left", padx=(0, 15))
+            status_label.pack(side="left", padx=(0, T.PAD_LG))
             self._browser_status_labels[platform] = status_label
 
             login_btn = ctk.CTkButton(
-                platform_frame,
-                text="登入瀏覽器",
-                width=100,
-                height=28,
+                platform_frame, text="登入瀏覽器", width=100, height=28,
+                **T.BTN_PRIMARY,
                 command=lambda p=platform: self._browser_login(p),
             )
-            login_btn.pack(side="left", padx=(0, 8))
+            login_btn.pack(side="left", padx=(0, T.PAD_SM))
 
             ctk.CTkButton(
-                platform_frame,
-                text="登出",
-                width=60,
-                height=28,
-                fg_color="transparent",
-                border_width=1,
+                platform_frame, text="登出", width=60, height=28,
+                **T.BTN_GHOST,
                 command=lambda p=platform: self._browser_logout(p),
-            ).pack(side="left", padx=(0, 8))
+            ).pack(side="left", padx=(0, T.PAD_SM))
 
             ctk.CTkButton(
-                platform_frame,
-                text="測試連線",
-                width=80,
-                height=28,
-                fg_color="transparent",
-                border_width=1,
+                platform_frame, text="測試連線", width=80, height=28,
+                **T.BTN_GHOST,
                 command=lambda p=platform: self._test_browser_connection(p),
-            ).pack(side="left", padx=(0, 8))
+            ).pack(side="left", padx=(0, T.PAD_SM))
 
             test_status = ctk.CTkLabel(
-                platform_frame,
-                text="",
-                text_color="gray50",
-                font=ctk.CTkFont(size=11),
+                platform_frame, text="",
+                text_color=T.TEXT_TERTIARY, font=T.font_caption(),
             )
-            test_status.pack(side="left", padx=5)
+            test_status.pack(side="left", padx=T.PAD_XS)
             self._browser_test_labels[platform] = test_status
 
             if coming:
@@ -125,39 +135,44 @@ class SettingsFrame(ctk.CTkFrame):
         # ── Facebook Monitor Targets ──
         row = self._add_section_title(scroll, "Facebook 監控社團 / 粉專（即將推出）", row, muted=True)
 
-        # Add target form
         fb_target_form = ctk.CTkFrame(scroll, fg_color="transparent")
-        fb_target_form.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
+        fb_target_form.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=T.PAD_XS)
         fb_target_form.grid_columnconfigure(2, weight=1)
 
         self._fb_target_type_var = ctk.StringVar(value="group")
         ctk.CTkOptionMenu(
-            fb_target_form,
-            values=["group", "page"],
-            variable=self._fb_target_type_var,
-            width=100,
-        ).grid(row=0, column=0, padx=(0, 8), sticky="w")
+            fb_target_form, values=["group", "page"],
+            variable=self._fb_target_type_var, width=100,
+            fg_color=T.NAVY_700, button_color=T.NAVY_600,
+            button_hover_color=T.NAVY_500,
+            dropdown_fg_color=T.BG_ELEVATED,
+            text_color=T.TEXT_PRIMARY,
+        ).grid(row=0, column=0, padx=(0, T.PAD_SM), sticky="w")
 
         self._fb_target_id_entry = ctk.CTkEntry(
             fb_target_form, placeholder_text="Group / Page ID", width=200,
+            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+            text_color=T.TEXT_PRIMARY,
         )
-        self._fb_target_id_entry.grid(row=0, column=1, padx=(0, 8), sticky="w")
+        self._fb_target_id_entry.grid(row=0, column=1, padx=(0, T.PAD_SM), sticky="w")
 
         self._fb_target_name_entry = ctk.CTkEntry(
             fb_target_form, placeholder_text="名稱（選填）", width=180,
+            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+            text_color=T.TEXT_PRIMARY,
         )
-        self._fb_target_name_entry.grid(row=0, column=2, padx=(0, 8), sticky="ew")
+        self._fb_target_name_entry.grid(row=0, column=2, padx=(0, T.PAD_SM), sticky="ew")
 
         ctk.CTkButton(
             fb_target_form, text="新增", width=70,
+            **T.BTN_PRIMARY,
             command=self._add_fb_target,
         ).grid(row=0, column=3, sticky="e")
         self._disable_frame_children(fb_target_form)
         row += 1
 
-        # Target list container
         self._fb_targets_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        self._fb_targets_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=(0, 4))
+        self._fb_targets_frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=(0, T.PAD_XS))
         self._fb_targets_frame.grid_columnconfigure(0, weight=1)
         self._fb_target_widgets: list[ctk.CTkFrame] = []
         row += 1
@@ -168,21 +183,25 @@ class SettingsFrame(ctk.CTkFrame):
         ctk.CTkLabel(
             scroll,
             text="需先安裝 Ollama (https://ollama.com)，安裝後於終端機執行 ollama pull <模型名稱>（如 ollama pull llama3.2）下載模型",
-            text_color="gray50", font=ctk.CTkFont(size=12),
+            text_color=T.TEXT_TERTIARY, font=T.font_small(),
             wraplength=500, justify="left",
-        ).grid(row=row, column=0, sticky="w", padx=14, pady=(0, 4))
+        ).grid(row=row, column=0, sticky="w", padx=(T.PAD_LG + 2), pady=(0, T.PAD_XS))
         row += 1
 
         ollama_toggle_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        ollama_toggle_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
-        ctk.CTkLabel(ollama_toggle_frame, text="停用").pack(side="left")
+        ollama_toggle_frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=T.PAD_XS)
+        ctk.CTkLabel(ollama_toggle_frame, text="停用",
+                     text_color=T.TEXT_TERTIARY).pack(side="left")
         self._ollama_switch_var = ctk.StringVar(value="0")
         self._ollama_switch = ctk.CTkSwitch(
             ollama_toggle_frame, text="啟用（全自動模式下由 AI 判斷是否回覆）",
             variable=self._ollama_switch_var,
             onvalue="1", offvalue="0",
+            fg_color=T.NAVY_600, progress_color=T.GOLD_500,
+            button_color=T.TEXT_PRIMARY, button_hover_color=T.GOLD_400,
+            text_color=T.TEXT_TERTIARY,
         )
-        self._ollama_switch.pack(side="left", padx=10)
+        self._ollama_switch.pack(side="left", padx=T.PAD_MD)
         self._disable_frame_children(ollama_toggle_frame)
         row += 1
 
@@ -192,15 +211,16 @@ class SettingsFrame(ctk.CTkFrame):
         self._entries["ollama_model"].configure(state="disabled")
 
         test_btn_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        test_btn_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
+        test_btn_frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=T.PAD_XS)
         ctk.CTkButton(
             test_btn_frame, text="測試連線", width=100,
+            **T.BTN_GHOST,
             command=self._test_ollama_connection,
         ).pack(side="left")
         self._ollama_status_label = ctk.CTkLabel(
-            test_btn_frame, text="", text_color="gray50",
+            test_btn_frame, text="", text_color=T.TEXT_TERTIARY,
         )
-        self._ollama_status_label.pack(side="left", padx=10)
+        self._ollama_status_label.pack(side="left", padx=T.PAD_MD)
         self._disable_frame_children(test_btn_frame)
         row += 1
 
@@ -218,21 +238,16 @@ class SettingsFrame(ctk.CTkFrame):
         # Save button
         ctk.CTkButton(
             scroll, text="儲存設定", height=40,
+            **T.BTN_PRIMARY,
             command=self._save_settings,
-        ).grid(row=row, column=0, pady=20, padx=10, sticky="ew")
+        ).grid(row=row, column=0, pady=T.PAD_XL, padx=T.PAD_MD, sticky="ew")
 
     def _add_section_title(self, parent, title: str, row: int, muted: bool = False) -> int:
-        color = ("gray50", "gray60") if muted else None
-        ctk.CTkLabel(
-            parent, text=title,
-            font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=color,
-        ).grid(row=row, column=0, sticky="w", padx=10, pady=(15, 5))
+        T.section_title(parent, title, row=row, columnspan=1, muted=muted)
         return row + 1
 
     @staticmethod
     def _disable_frame_children(frame):
-        """Recursively disable all interactive widgets in a frame."""
         for child in frame.winfo_children():
             try:
                 child.configure(state="disabled")
@@ -260,14 +275,13 @@ class SettingsFrame(ctk.CTkFrame):
         if status_label:
             status_label.configure(
                 text="登入中... 請在彈出的瀏覽器中完成登入",
-                text_color=("#FF9800", "#FFA726"),
+                text_color=T.WARNING,
             )
 
         def _worker():
             try:
                 if self.app._shutting_down:
                     return
-                # login_interactive uses a separate headed browser internally
                 bm = self.app.browser_manager
                 success = bm.login_interactive(platform, url)
 
@@ -279,8 +293,7 @@ class SettingsFrame(ctk.CTkFrame):
                     else:
                         if status_label:
                             status_label.configure(
-                                text="登入失敗或逾時",
-                                text_color=("#F44336", "#EF5350"),
+                                text="登入失敗或逾時", text_color=T.ERROR,
                             )
                         show_toast(self, f"{platform.capitalize()} 登入失敗", "error")
 
@@ -289,8 +302,7 @@ class SettingsFrame(ctk.CTkFrame):
                 def _error(err=str(e)):
                     if status_label:
                         status_label.configure(
-                            text=f"錯誤: {err[:40]}",
-                            text_color=("#F44336", "#EF5350"),
+                            text=f"錯誤: {err[:40]}", text_color=T.ERROR,
                         )
 
                 self.app.run_in_gui(_error)
@@ -308,7 +320,7 @@ class SettingsFrame(ctk.CTkFrame):
     def _test_browser_connection(self, platform: str):
         test_label = self._browser_test_labels.get(platform)
         if test_label:
-            test_label.configure(text="測試中...", text_color=("#FF9800", "#FFA726"))
+            test_label.configure(text="測試中...", text_color=T.WARNING)
 
         def _worker():
             try:
@@ -330,15 +342,14 @@ class SettingsFrame(ctk.CTkFrame):
 
                 def _finish():
                     if test_label:
-                        color = ("#4CAF50", "#66BB6A") if success else ("#F44336", "#EF5350")
+                        color = T.TEAL_500 if success else T.ERROR
                         test_label.configure(text=message, text_color=color)
 
                 self.app.run_in_gui(_finish)
             except Exception as e:
                 self.app.run_in_gui(
                     lambda err=str(e): test_label.configure(
-                        text=f"錯誤: {err[:40]}",
-                        text_color=("#F44336", "#EF5350"),
+                        text=f"錯誤: {err[:40]}", text_color=T.ERROR,
                     ) if test_label else None
                 )
 
@@ -350,41 +361,42 @@ class SettingsFrame(ctk.CTkFrame):
         label = self._browser_status_labels.get(platform)
         if label:
             if has_session:
-                label.configure(text="● 已登入", text_color=("#4CAF50", "#66BB6A"))
+                label.configure(text="● 已登入", text_color=T.TEAL_500)
             else:
-                label.configure(text="○ 未登入", text_color=("gray50", "gray60"))
+                label.configure(text="○ 未登入", text_color=T.TEXT_TERTIARY)
 
     def _add_entry(self, parent, key: str, label: str, row: int,
                    show: str = "", default: str = "") -> int:
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.grid(row=row, column=0, sticky="ew", padx=10, pady=2)
+        frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=2)
         frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(frame, text=label, width=180, anchor="w").grid(row=0, column=0, sticky="w")
-        entry = ctk.CTkEntry(frame, show=show if show else "", placeholder_text=default)
-        entry.grid(row=0, column=1, sticky="ew", padx=(10, 0))
+        ctk.CTkLabel(frame, text=label, width=180, anchor="w",
+                     text_color=T.TEXT_SECONDARY, font=T.font_small()).grid(row=0, column=0, sticky="w")
+        entry = ctk.CTkEntry(
+            frame, show=show if show else "", placeholder_text=default,
+            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+            text_color=T.TEXT_PRIMARY,
+        )
+        entry.grid(row=0, column=1, sticky="ew", padx=(T.PAD_MD, 0))
         self._entries[key] = entry
         return row + 1
 
     def refresh(self):
         repo = self.app.repo
 
-        # Mode
         mode = repo.get_setting("reply_mode", "semi_auto")
         self._mode_switch_var.set("1" if mode == "full_auto" else "0")
 
-        # Browser visible
         browser_visible = repo.get_setting("browser_visible", "0")
         self._visible_switch_var.set(browser_visible)
 
-        # Ollama settings (forced off in first release)
         self._ollama_switch_var.set("0")
         for key in ("ollama_url", "ollama_model"):
             default = "http://localhost:11434" if key == "ollama_url" else "llama3.2"
             self._set_entry(key, repo.get_setting(key, default))
-        self._ollama_status_label.configure(text="", text_color="gray50")
+        self._ollama_status_label.configure(text="", text_color=T.TEXT_TERTIARY)
 
-        # Safety settings
         from config import DEFAULT_SETTINGS
         for key in ("daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
                      "reply_interval_min_sec", "reply_interval_max_sec",
@@ -398,7 +410,7 @@ class SettingsFrame(ctk.CTkFrame):
         for platform in ("threads", "facebook", "instagram"):
             if platform in self._COMING_SOON_PLATS:
                 self._browser_status_labels[platform].configure(
-                    text="即將推出", text_color=("gray50", "gray60"),
+                    text="即將推出", text_color=T.TEXT_TERTIARY,
                 )
             else:
                 self._update_browser_status(platform)
@@ -425,7 +437,7 @@ class SettingsFrame(ctk.CTkFrame):
     def _test_ollama_connection(self):
         url = self._get_entry("ollama_url") or "http://localhost:11434"
         model = self._get_entry("ollama_model") or "llama3.2"
-        self._ollama_status_label.configure(text="連線中...", text_color=("#FF9800", "#FFA726"))
+        self._ollama_status_label.configure(text="連線中...", text_color=T.WARNING)
 
         def _test():
             from src.core.ollama_judge import OllamaJudge
@@ -433,11 +445,11 @@ class SettingsFrame(ctk.CTkFrame):
             success, message = judge.check_connection()
             if success:
                 self.app.run_in_gui(lambda: self._ollama_status_label.configure(
-                    text=message, text_color=("#4CAF50", "#66BB6A"),
+                    text=message, text_color=T.TEAL_500,
                 ))
             else:
                 self.app.run_in_gui(lambda m=message: self._ollama_status_label.configure(
-                    text=m, text_color=("red", "#EF5350"),
+                    text=m, text_color=T.ERROR,
                 ))
 
         threading.Thread(target=_test, daemon=True).start()
@@ -445,7 +457,6 @@ class SettingsFrame(ctk.CTkFrame):
     def _do_save(self):
         repo = self.app.repo
 
-        # Validate all fields BEFORE committing any DB writes
         numeric_keys = (
             "daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
             "reply_interval_min_sec", "reply_interval_max_sec",
@@ -476,20 +487,15 @@ class SettingsFrame(ctk.CTkFrame):
                     show_toast(self, f"「{label}」格式錯誤，請用 HH:MM（如 09:00）", "error", duration_ms=3000)
                     return
 
-        # All validation passed — now commit to DB
-
-        # Mode
         mode = "full_auto" if self._mode_switch_var.get() == "1" else "semi_auto"
         repo.set_setting("reply_mode", mode)
 
-        # Ollama settings (forced off in first release)
         repo.set_setting("ollama_enabled", "0")
         for key in ("ollama_url", "ollama_model"):
             default = "http://localhost:11434" if key == "ollama_url" else "llama3.2"
             val = self._get_entry(key) or default
             repo.set_setting(key, val)
 
-        # Safety settings (already validated above)
         for key in numeric_keys:
             val = self._get_entry(key)
             if val:
@@ -534,42 +540,40 @@ class SettingsFrame(ctk.CTkFrame):
         if not targets:
             empty = ctk.CTkLabel(
                 self._fb_targets_frame, text="尚未設定監控目標",
-                text_color="gray50", font=ctk.CTkFont(size=12),
+                text_color=T.TEXT_TERTIARY, font=T.font_small(),
             )
-            empty.grid(row=0, column=0, pady=8)
+            empty.grid(row=0, column=0, pady=T.PAD_SM)
             self._fb_target_widgets.append(empty)
             return
 
         for i, t in enumerate(targets):
-            row_frame = ctk.CTkFrame(self._fb_targets_frame)
-            row_frame.grid(row=i, column=0, sticky="ew", pady=2)
+            row_frame = T.card_frame(self._fb_targets_frame,
+                                     row=i, column=0, sticky="ew", pady=2)
             row_frame.grid_columnconfigure(2, weight=1)
 
             type_text = "社團" if t["target_type"] == "group" else "粉專"
             ctk.CTkLabel(
                 row_frame, text=f"[{type_text}]",
-                font=ctk.CTkFont(size=11), text_color=("blue", "#64B5F6"),
+                font=T.font_small(), text_color=T.GOLD_500,
                 width=50,
-            ).grid(row=0, column=0, padx=(8, 4), pady=6, sticky="w")
+            ).grid(row=0, column=0, padx=(T.PAD_SM, T.PAD_XS), pady=T.PAD_SM, sticky="w")
 
             display_name = t.get("target_name") or t["target_id"]
             ctk.CTkLabel(
                 row_frame, text=display_name,
-                font=ctk.CTkFont(size=12),
-            ).grid(row=0, column=1, padx=(0, 8), pady=6, sticky="w")
+                font=T.font_body(), text_color=T.TEXT_PRIMARY,
+            ).grid(row=0, column=1, padx=(0, T.PAD_SM), pady=T.PAD_SM, sticky="w")
 
             ctk.CTkLabel(
                 row_frame, text=t["target_id"],
-                font=ctk.CTkFont(size=10), text_color="gray50",
-            ).grid(row=0, column=2, pady=6, sticky="w")
+                font=T.font_caption(), text_color=T.TEXT_TERTIARY,
+            ).grid(row=0, column=2, pady=T.PAD_SM, sticky="w")
 
             ctk.CTkButton(
                 row_frame, text="移除", width=50, height=26,
-                fg_color="transparent", border_width=1,
-                text_color=("red", "#EF5350"),
-                hover_color=("gray90", "gray20"),
+                **T.BTN_GHOST_DANGER,
                 command=lambda tid=t["target_id"]: self._remove_fb_target(tid),
-            ).grid(row=0, column=3, padx=8, pady=4, sticky="e")
+            ).grid(row=0, column=3, padx=T.PAD_SM, pady=T.PAD_XS, sticky="e")
 
             self._disable_frame_children(row_frame)
             self._fb_target_widgets.append(row_frame)
