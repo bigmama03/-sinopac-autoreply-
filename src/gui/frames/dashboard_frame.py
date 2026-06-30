@@ -120,6 +120,7 @@ class DashboardFrame(ctk.CTkFrame):
         "facebook": "Facebook",
         "instagram": "Instagram",
     }
+    _COMING_SOON_PLATS = {"facebook", "instagram"}
 
     def __init__(self, parent, app):
         self._configure_matplotlib()
@@ -222,13 +223,17 @@ class DashboardFrame(ctk.CTkFrame):
             ("instagram", "Instagram", "#E4405F"),
         ]
         for i, (key, label, accent) in enumerate(platforms):
+            coming = key in self._COMING_SOON_PLATS
             cell = ctk.CTkFrame(status_row, fg_color="transparent")
             cell.grid(row=0, column=i, padx=12, pady=10, sticky="nsew")
+            title_text = f"{label}（即將推出）" if coming else label
+            title_color = "gray50" if coming else accent
             ctk.CTkLabel(
-                cell, text=label, font=ctk.CTkFont(size=13, weight="bold"),
-                text_color=accent,
+                cell, text=title_text, font=ctk.CTkFont(size=13, weight="bold"),
+                text_color=title_color,
             ).pack(anchor="w")
-            status_label = ctk.CTkLabel(cell, text="未設定", text_color="gray50", font=ctk.CTkFont(size=12))
+            status_text = "即將推出" if coming else "未設定"
+            status_label = ctk.CTkLabel(cell, text=status_text, text_color="gray50", font=ctk.CTkFont(size=12))
             status_label.pack(anchor="w")
             self._platform_status[key] = status_label
 
@@ -429,7 +434,7 @@ class DashboardFrame(ctk.CTkFrame):
                 self._patrol_btn.configure(state="normal")
         else:
             configured_platforms = []
-            all_platforms = list(self._PATROL_PLATFORMS)
+            all_platforms = [p for p in self._PATROL_PLATFORMS if p not in self._COMING_SOON_PLATS]
             bm = self.app.browser_manager
             for plat in all_platforms:
                 config = self.app.repo.get_platform_config(plat)
@@ -806,6 +811,8 @@ class DashboardFrame(ctk.CTkFrame):
 
         bm = self.app.browser_manager
         for plat_key, label in self._platform_status.items():
+            if plat_key in self._COMING_SOON_PLATS:
+                continue  # keep "即將推出" text
             config = repo.get_platform_config(plat_key)
             has_session = bm.has_session(plat_key)
             if config and config.is_enabled and has_session:

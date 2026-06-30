@@ -179,6 +179,9 @@ class PatrolScheduler:
         except (ValueError, TypeError):
             return default
 
+    # Platforms disabled in first release (UI greyed out, scheduler skips)
+    _DISABLED_PLATFORMS = {'facebook', 'instagram'}
+
     def _register_adapters(self, platforms: Optional[list[str]] = None):
         platform_filter = set(platforms) if platforms is not None else None
 
@@ -186,6 +189,8 @@ class PatrolScheduler:
             raise RuntimeError("BrowserManager not injected — cannot register adapters")
 
         for plat in ('threads', 'facebook', 'instagram'):
+            if plat in self._DISABLED_PLATFORMS:
+                continue
             if platform_filter is not None and plat not in platform_filter:
                 continue
 

@@ -14,6 +14,8 @@ except ImportError:
 
 
 class SettingsFrame(ctk.CTkFrame):
+    _COMING_SOON_PLATS = {"facebook", "instagram"}
+
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
         self.app = app
@@ -64,7 +66,9 @@ class SettingsFrame(ctk.CTkFrame):
             ("facebook", "Facebook 瀏覽器設定"),
             ("instagram", "Instagram 瀏覽器設定"),
         ):
-            row = self._add_section_title(scroll, title, row)
+            coming = platform in self._COMING_SOON_PLATS
+            suffix = "（即將推出）" if coming else ""
+            row = self._add_section_title(scroll, title + suffix, row, muted=coming)
 
             platform_frame = ctk.CTkFrame(scroll, fg_color="transparent")
             platform_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
@@ -113,10 +117,13 @@ class SettingsFrame(ctk.CTkFrame):
             test_status.pack(side="left", padx=5)
             self._browser_test_labels[platform] = test_status
 
+            if coming:
+                self._disable_frame_children(platform_frame)
+
             row += 1
 
         # ── Facebook Monitor Targets ──
-        row = self._add_section_title(scroll, "Facebook 監控社團 / 粉專", row)
+        row = self._add_section_title(scroll, "Facebook 監控社團 / 粉專（即將推出）", row, muted=True)
 
         # Add target form
         fb_target_form = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -145,6 +152,7 @@ class SettingsFrame(ctk.CTkFrame):
             fb_target_form, text="新增", width=70,
             command=self._add_fb_target,
         ).grid(row=0, column=3, sticky="e")
+        self._disable_frame_children(fb_target_form)
         row += 1
 
         # Target list container
@@ -155,7 +163,7 @@ class SettingsFrame(ctk.CTkFrame):
         row += 1
 
         # ── Ollama AI Judge ──
-        row = self._add_section_title(scroll, "Ollama AI 判斷", row)
+        row = self._add_section_title(scroll, "Ollama AI 判斷（即將推出）", row, muted=True)
 
         ctk.CTkLabel(
             scroll,
@@ -175,10 +183,13 @@ class SettingsFrame(ctk.CTkFrame):
             onvalue="1", offvalue="0",
         )
         self._ollama_switch.pack(side="left", padx=10)
+        self._disable_frame_children(ollama_toggle_frame)
         row += 1
 
         row = self._add_entry(scroll, "ollama_url", "Ollama URL", row, default="http://localhost:11434")
         row = self._add_entry(scroll, "ollama_model", "模型名稱", row, default="llama3.2")
+        self._entries["ollama_url"].configure(state="disabled")
+        self._entries["ollama_model"].configure(state="disabled")
 
         test_btn_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         test_btn_frame.grid(row=row, column=0, sticky="ew", padx=10, pady=4)
@@ -190,6 +201,7 @@ class SettingsFrame(ctk.CTkFrame):
             test_btn_frame, text="", text_color="gray50",
         )
         self._ollama_status_label.pack(side="left", padx=10)
+        self._disable_frame_children(test_btn_frame)
         row += 1
 
         # ── Safety Parameters ──
@@ -209,12 +221,25 @@ class SettingsFrame(ctk.CTkFrame):
             command=self._save_settings,
         ).grid(row=row, column=0, pady=20, padx=10, sticky="ew")
 
-    def _add_section_title(self, parent, title: str, row: int) -> int:
+    def _add_section_title(self, parent, title: str, row: int, muted: bool = False) -> int:
+        color = ("gray50", "gray60") if muted else None
         ctk.CTkLabel(
             parent, text=title,
             font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=color,
         ).grid(row=row, column=0, sticky="w", padx=10, pady=(15, 5))
         return row + 1
+
+    @staticmethod
+    def _disable_frame_children(frame):
+        """Recursively disable all interactive widgets in a frame."""
+        for child in frame.winfo_children():
+            try:
+                child.configure(state="disabled")
+            except Exception:
+                pass
+            if hasattr(child, "winfo_children"):
+                SettingsFrame._disable_frame_children(child)
 
     def _on_browser_visible_change(self):
         visible = self._visible_switch_var.get() == "1"
@@ -352,9 +377,8 @@ class SettingsFrame(ctk.CTkFrame):
         browser_visible = repo.get_setting("browser_visible", "0")
         self._visible_switch_var.set(browser_visible)
 
-        # Ollama settings
-        ollama_enabled = repo.get_setting("ollama_enabled", "0")
-        self._ollama_switch_var.set(ollama_enabled)
+        # Ollama settings (forced off in first release)
+        self._ollama_switch_var.set("0")
         for key in ("ollama_url", "ollama_model"):
             default = "http://localhost:11434" if key == "ollama_url" else "llama3.2"
             self._set_entry(key, repo.get_setting(key, default))
@@ -372,7 +396,12 @@ class SettingsFrame(ctk.CTkFrame):
                 self._set_entry(key, val)
         self._refresh_fb_targets()
         for platform in ("threads", "facebook", "instagram"):
-            self._update_browser_status(platform)
+            if platform in self._COMING_SOON_PLATS:
+                self._browser_status_labels[platform].configure(
+                    text="即將推出", text_color=("gray50", "gray60"),
+                )
+            else:
+                self._update_browser_status(platform)
 
     def _set_entry(self, key: str, value: str):
         entry = self._entries.get(key)
@@ -453,9 +482,8 @@ class SettingsFrame(ctk.CTkFrame):
         mode = "full_auto" if self._mode_switch_var.get() == "1" else "semi_auto"
         repo.set_setting("reply_mode", mode)
 
-        # Ollama settings
-        ollama_enabled = self._ollama_switch_var.get()
-        repo.set_setting("ollama_enabled", ollama_enabled)
+        # Ollama settings (forced off in first release)
+        repo.set_setting("ollama_enabled", "0")
         for key in ("ollama_url", "ollama_model"):
             default = "http://localhost:11434" if key == "ollama_url" else "llama3.2"
             val = self._get_entry(key) or default
@@ -543,6 +571,7 @@ class SettingsFrame(ctk.CTkFrame):
                 command=lambda tid=t["target_id"]: self._remove_fb_target(tid),
             ).grid(row=0, column=3, padx=8, pady=4, sticky="e")
 
+            self._disable_frame_children(row_frame)
             self._fb_target_widgets.append(row_frame)
 
     def _show_msg(self, title: str, message: str, icon: str = "info"):
