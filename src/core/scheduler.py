@@ -123,9 +123,9 @@ class PatrolScheduler:
         })
         logger.info("Patrol started (session %d): %s", self._session_id, platforms)
 
-    def stop(self):
+    def stop(self, wait: bool = True):
         if self._scheduler and self._running:
-            self._scheduler.shutdown(wait=True)
+            self._scheduler.shutdown(wait=wait)
             self._scheduler = None
             self._running = False
             self._sending_paused = False

@@ -348,8 +348,16 @@ class BrowserManager:
                 ctx.close()
                 logger.debug("Closed context for %s", platform)
 
-    def close(self) -> None:
-        """Save all sessions and shut down Playwright."""
-        with self._lock:
+    def close(self, timeout: float = 5) -> None:
+        """Save all sessions and shut down Playwright.
+
+        Uses a lock timeout to avoid deadlock when patrol thread holds the lock
+        during app shutdown.  Daemon threads are killed on process exit anyway.
+        """
+        acquired = self._lock.acquire(timeout=timeout)
+        try:
             self._teardown_browser()
             logger.info("BrowserManager closed")
+        finally:
+            if acquired:
+                self._lock.release()

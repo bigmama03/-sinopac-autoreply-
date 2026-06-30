@@ -372,7 +372,9 @@ class App(ctk.CTk):
         self._shutting_down = True
         if hasattr(self, "_badge_after_id"):
             self.after_cancel(self._badge_after_id)
-        self.scheduler.stop()
+        # Non-blocking shutdown: don't wait for patrol thread to finish,
+        # daemon threads are killed on process exit.
+        self.scheduler.stop(wait=False)
         self.browser_manager.close()
         self.db.close()
         super().destroy()
