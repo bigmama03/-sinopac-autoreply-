@@ -4,6 +4,7 @@ import csv
 import customtkinter as ctk
 from tkinter import filedialog
 
+from src.gui import theme as T
 from src.gui.widgets.toast import show_toast
 
 try:
@@ -21,30 +22,44 @@ class TemplatesFrame(ctk.CTkFrame):
         self.grid_rowconfigure(2, weight=1)
 
         # Title row
-        title_row = ctk.CTkFrame(self, fg_color="transparent")
-        title_row.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        title_row.grid_columnconfigure(1, weight=1)
+        title_row = T.page_header(self, "文案管理")
+        title_row.grid(row=0, column=0, sticky="ew", pady=(0, T.PAD_MD))
 
-        ctk.CTkLabel(
-            title_row, text="文案管理",
-            font=ctk.CTkFont(size=22, weight="bold"),
-        ).grid(row=0, column=0, sticky="w")
-
-        self._count_label = ctk.CTkLabel(title_row, text="共 0 則文案", text_color="gray60")
-        self._count_label.grid(row=0, column=1, sticky="w", padx=15)
+        self._count_label = ctk.CTkLabel(
+            title_row, text="共 0 則文案",
+            text_color=T.TEXT_TERTIARY, font=T.font_small(),
+        )
+        self._count_label.pack(side="left", padx=T.PAD_LG)
 
         # Buttons row
         btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        btn_row.grid(row=1, column=0, sticky="ew", pady=(0, T.PAD_MD))
 
-        ctk.CTkButton(btn_row, text="匯入 CSV/Excel", command=self._import_file, width=150).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(btn_row, text="下載匯入範本", command=self._download_template, width=130,
-                       fg_color="transparent", border_width=1, text_color=("gray10", "gray90")).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(btn_row, text="清除全部文案", command=self._clear_all, width=130,
-                       fg_color="transparent", border_width=1, text_color=("gray10", "gray90")).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            btn_row, text="匯入 CSV/Excel", width=150,
+            **T.BTN_PRIMARY,
+            command=self._import_file,
+        ).pack(side="left", padx=(0, T.PAD_SM))
 
-        # Template list (scrollable)
-        self._scroll_frame = ctk.CTkScrollableFrame(self)
+        ctk.CTkButton(
+            btn_row, text="下載匯入範本", width=130,
+            **T.BTN_GHOST,
+            command=self._download_template,
+        ).pack(side="left", padx=(0, T.PAD_SM))
+
+        ctk.CTkButton(
+            btn_row, text="清除全部文案", width=130,
+            **T.BTN_GHOST_DANGER,
+            command=self._clear_all,
+        ).pack(side="left", padx=(0, T.PAD_SM))
+
+        # Template list
+        self._scroll_frame = ctk.CTkScrollableFrame(
+            self, fg_color=T.BG_APP,
+            scrollbar_fg_color=T.BG_APP,
+            scrollbar_button_color=T.NAVY_600,
+            scrollbar_button_hover_color=T.NAVY_500,
+        )
         self._scroll_frame.grid(row=2, column=0, sticky="nsew")
         self._scroll_frame.grid_columnconfigure(0, weight=1)
 
@@ -54,7 +69,6 @@ class TemplatesFrame(ctk.CTkFrame):
         templates = self.app.template_manager.get_all()
         self._count_label.configure(text=f"共 {len(templates)} 則文案")
 
-        # Clear existing widgets
         for w in self._template_widgets:
             w.destroy()
         self._template_widgets.clear()
@@ -62,7 +76,7 @@ class TemplatesFrame(ctk.CTkFrame):
         if not templates:
             empty = ctk.CTkLabel(
                 self._scroll_frame, text="尚未匯入文案\n請點擊「匯入 CSV/Excel」按鈕",
-                text_color="gray50", font=ctk.CTkFont(size=14),
+                text_color=T.TEXT_TERTIARY, font=T.font_body(),
             )
             empty.grid(row=0, column=0, pady=40)
             self._template_widgets.append(empty)
@@ -73,45 +87,45 @@ class TemplatesFrame(ctk.CTkFrame):
             self._template_widgets.append(card)
 
     def _create_template_card(self, template, index: int) -> ctk.CTkFrame:
-        card = ctk.CTkFrame(self._scroll_frame)
-        card.grid(row=index, column=0, sticky="ew", pady=3, padx=2)
+        card = T.card_frame(self._scroll_frame,
+                            row=index, column=0, sticky="ew",
+                            pady=T.PAD_XS, padx=2)
         card.grid_columnconfigure(1, weight=1)
 
-        # Code + Category badge
+        # Header: code + category + platforms
         header = ctk.CTkFrame(card, fg_color="transparent")
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 2))
+        header.grid(row=0, column=0, columnspan=2, sticky="ew",
+                    padx=T.PAD_MD, pady=(T.PAD_SM, T.PAD_XS))
 
         ctk.CTkLabel(
             header, text=template.template_code,
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=T.font_card_title(), text_color=T.TEXT_PRIMARY,
         ).pack(side="left")
 
         ctk.CTkLabel(
             header, text=f"[{template.category}]",
-            font=ctk.CTkFont(size=11),
-            text_color=("blue", "#64B5F6"),
-        ).pack(side="left", padx=8)
+            font=T.font_small(), text_color=T.GOLD_500,
+        ).pack(side="left", padx=T.PAD_SM)
 
         ctk.CTkLabel(
             header, text=template.platforms,
-            font=ctk.CTkFont(size=10), text_color="gray50",
+            font=T.font_caption(), text_color=T.TEXT_TERTIARY,
         ).pack(side="left")
 
         # Content preview
         preview = template.content[:120] + ("..." if len(template.content) > 120 else "")
         ctk.CTkLabel(
             card, text=preview, wraplength=700, justify="left",
-            font=ctk.CTkFont(size=12),
-        ).grid(row=1, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+            font=T.font_body(), text_color=T.TEXT_SECONDARY,
+        ).grid(row=1, column=0, columnspan=2, sticky="w",
+               padx=T.PAD_MD, pady=(0, T.PAD_SM))
 
         # Delete button
         ctk.CTkButton(
             card, text="刪除", width=60, height=28,
-            fg_color="transparent", border_width=1,
-            text_color=("red", "#EF5350"),
-            hover_color=("gray90", "gray20"),
+            **T.BTN_GHOST_DANGER,
             command=lambda tid=template.id: self._delete_template(tid),
-        ).grid(row=0, column=1, sticky="e", padx=10, pady=8)
+        ).grid(row=0, column=1, sticky="e", padx=T.PAD_MD, pady=T.PAD_SM)
 
         return card
 
