@@ -141,6 +141,7 @@ class PatrolScheduler:
             else:
                 self.repo.log_audit("PATROL_STOPPED", {})
                 logger.info("Patrol stopped")
+            self._emit_log("info", "海巡已停止")
 
     def pause_sending(self):
         """Pause the reply sending job."""
@@ -153,6 +154,7 @@ class PatrolScheduler:
             self._sending_paused = True
             self.repo.set_setting("sending_paused", "1")
             self.repo.log_audit("SENDING_PAUSED", {})
+            self._emit_log("warning", "回覆發送已暫停")
             logger.info("Reply sending paused")
 
     def resume_sending(self):
@@ -166,6 +168,7 @@ class PatrolScheduler:
             self._sending_paused = False
             self.repo.set_setting("sending_paused", "0")
             self.repo.log_audit("SENDING_RESUMED", {})
+            self._emit_log("success", "回覆發送已恢復")
             logger.info("Reply sending resumed")
 
     def _emit_log(self, level: str, message: str):

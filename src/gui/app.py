@@ -41,9 +41,13 @@ class App(ctk.CTk):
         self.compliance = ComplianceGate(self.repo)
         self.ollama_judge = self._create_ollama_judge()
 
+        _patrol_log_cb = lambda level, msg: self.run_in_gui(
+            lambda l=level, m=msg: self._on_patrol_log(l, m)
+        )
         self.reply_engine = ReplyEngine(
             self.repo, self.keyword_matcher, self.compliance, self.template_manager,
             ollama_judge=self.ollama_judge,
+            on_log=_patrol_log_cb,
         )
         self.rate_limiters = PlatformRateLimiters()
         browser_visible = self.repo.get_setting("browser_visible", "0") == "1"
@@ -57,13 +61,11 @@ class App(ctk.CTk):
             on_shadowban=lambda plat, cnt: self.run_in_gui(
                 lambda p=plat, c=cnt: self._on_shadowban(p, c)
             ),
-            on_patrol_log=lambda level, msg: self.run_in_gui(
-                lambda l=level, m=msg: self._on_patrol_log(l, m)
-            ),
+            on_patrol_log=_patrol_log_cb,
         )
 
         # Thread-safe message queue for background → GUI communication
-        self.msg_queue: queue.Queue = queue.Queue()
+        self.msg_queue: queue.Queue = queue.Queue(maxsize=500)
         self._patrol_log_buffer: list[tuple[str, str]] = []  # buffer before monitor frame exists
         self._shutting_down = False  # Flag for daemon threads to check
 
@@ -250,7 +252,12 @@ class App(ctk.CTk):
 
     def run_in_gui(self, callback):
         """Schedule a callback to run on the GUI thread."""
-        self.msg_queue.put(callback)
+        if self._shutting_down:
+            return
+        try:
+            self.msg_queue.put_nowait(callback)
+        except queue.Full:
+            pass  # drop callback if queue is full
 
     def _update_sidebar_badges(self):
         """Update the pending count badges on review and replies nav items."""

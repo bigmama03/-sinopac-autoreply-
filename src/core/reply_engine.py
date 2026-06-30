@@ -25,16 +25,22 @@ class ReplyEngine:
 
     def __init__(self, repo: Repository, matcher: KeywordMatcher,
                  compliance: ComplianceGate, template_manager: TemplateManager,
-                 ollama_judge: "OllamaJudge | None" = None):
+                 ollama_judge: "OllamaJudge | None" = None,
+                 on_log: "Callable[[str, str], None] | None" = None):
         self.repo = repo
         self.matcher = matcher
         self.compliance = compliance
         self.template_manager = template_manager
         self.ollama_judge = ollama_judge
+        self.on_log = on_log
         self.adapters: dict[str, PlatformAdapter] = {}
         self._last_reply_time: dict[str, float] = {}
         self._scheduled_send_time: dict[int, float] = {}  # reply_id -> monotonic time to send
         self._schedule_lock = threading.Lock()
+
+    def _emit(self, level: str, message: str):
+        if self.on_log:
+            self.on_log(level, message)
 
     def _safe_int(self, setting_key: str, default: int) -> int:
         try:
@@ -100,9 +106,12 @@ class ReplyEngine:
                 new_count += 1
                 logger.info("Detected on %s: score=%.1f, keywords=%s, status=%s",
                             platform, result.score, result.matched_keywords, status)
+                kw_str = ", ".join(result.matched_keywords[:3])
+                self._emit("info", f"[{platform}] 偵測到貼文 (相關性 {result.score:.1f}, 關鍵字: {kw_str})")
 
                 if status == "approved" and rec_id:
                     self._queue_auto_reply(inserted_id, rec_id, platform, recommended[0].content)
+                    self._emit("info", f"[{platform}] 全自動模式：回覆已加入發送佇列")
 
         if raw_posts:
             logger.info(
@@ -188,6 +197,7 @@ class ReplyEngine:
             allowed, reason = self.compliance.can_reply(platform, platform_post_id)
             if not allowed:
                 logger.info("Reply blocked: %s", reason)
+                self._emit("warning", f"[{platform}] 回覆被安全規則擋下: {reason}")
                 self.repo.update_reply_status(reply_id, "failed", error_message=reason)
                 continue
 
@@ -207,6 +217,7 @@ class ReplyEngine:
                     delay = random.randint(min(min_delay, max_delay), max(min_delay, max_delay))
                     self._scheduled_send_time[reply_id] = time.monotonic() + delay
                     logger.info("Reply %d scheduled in %ds", reply_id, delay)
+                    self._emit("info", f"[{platform}] 回覆 #{reply_id} 已排程，{delay // 60} 分 {delay % 60} 秒後發送")
                     continue
 
                 if time.monotonic() < self._scheduled_send_time[reply_id]:
@@ -237,6 +248,7 @@ class ReplyEngine:
                 continue
 
             # Send reply
+            self._emit("info", f"[{platform}] 正在發送回覆 #{reply_id}...")
             success, platform_reply_id, error = adapter.reply_to_post(platform_post_id, reply_content)
 
             if success:
@@ -250,14 +262,17 @@ class ReplyEngine:
                     "post_id": platform_post_id,
                 })
                 logger.info("Reply sent on %s: %s", platform, platform_reply_id)
+                self._emit("success", f"[{platform}] 回覆 #{reply_id} 發送成功")
             else:
                 retry_count = row["retry_count"]
                 if retry_count < 3:
                     self.repo.update_reply_status(reply_id, "retrying", error_message=error)
                     logger.warning("Reply failed (%d/3): %s", retry_count + 1, error)
+                    self._emit("warning", f"[{platform}] 回覆 #{reply_id} 失敗 ({retry_count + 1}/3): {error[:50]}")
                 else:
                     self.repo.update_reply_status(reply_id, "failed", error_message=error)
                     self.repo.update_post_status(row["detected_post_id"], "failed")
                     logger.error("Reply permanently failed: %s", error)
+                    self._emit("error", f"[{platform}] 回覆 #{reply_id} 永久失敗: {error[:50]}")
 
         return sent_count
