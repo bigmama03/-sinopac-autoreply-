@@ -83,6 +83,7 @@ STATUS_SENT = SUCCESS
 
 STATUS_COLORS = {
     "pending": WARNING,
+    "sending": INFO,
     "approved": INFO,
     "replied": SUCCESS,
     "rejected": ERROR,

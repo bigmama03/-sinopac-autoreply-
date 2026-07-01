@@ -352,12 +352,16 @@ class BrowserManager:
         """Save all sessions and shut down Playwright.
 
         Uses a lock timeout to avoid deadlock when patrol thread holds the lock
-        during app shutdown.  Daemon threads are killed on process exit anyway.
+        during app shutdown.  If the lock cannot be acquired, teardown is
+        skipped — daemon threads are killed on process exit anyway.
         """
         acquired = self._lock.acquire(timeout=timeout)
+        if not acquired:
+            logger.warning("BrowserManager.close() could not acquire lock "
+                           "(patrol thread likely active); skipping teardown")
+            return
         try:
             self._teardown_browser()
             logger.info("BrowserManager closed")
         finally:
-            if acquired:
-                self._lock.release()
+            self._lock.release()

@@ -109,9 +109,14 @@ class ReplyEngine:
                 kw_str = ", ".join(result.matched_keywords[:3])
                 self._emit("info", f"[{platform}] 偵測到貼文 (相關性 {result.score:.1f}, 關鍵字: {kw_str})")
 
-                if status == "approved" and rec_id:
-                    self._queue_auto_reply(inserted_id, rec_id, platform, recommended[0].content)
-                    self._emit("info", f"[{platform}] 全自動模式：回覆已加入發送佇列")
+                if status == "approved":
+                    if rec_id:
+                        self._queue_auto_reply(inserted_id, rec_id, platform, recommended[0].content)
+                        self._emit("info", f"[{platform}] 全自動模式：回覆已加入發送佇列")
+                    else:
+                        # No template available — downgrade to pending for human review
+                        self.repo.update_post_status(inserted_id, "pending")
+                        self._emit("warning", f"[{platform}] 全自動模式：無可用文案，轉為人工審核")
 
         if raw_posts:
             logger.info(
@@ -171,7 +176,7 @@ class ReplyEngine:
             """SELECT rl.*, dp.platform_post_id
                FROM reply_log rl
                JOIN detected_posts dp ON rl.detected_post_id = dp.id
-               WHERE rl.status IN ('pending', 'retrying')
+               WHERE rl.status IN ('pending', 'retrying', 'sending')
                ORDER BY rl.created_at ASC"""
         ).fetchall()
 
@@ -237,9 +242,9 @@ class ReplyEngine:
             except Exception as e:
                 logger.warning("check_already_replied failed: %s", e)
 
-            # Atomic claim: skip if status changed (e.g. cancelled) since snapshot
+            # Atomic claim: set status to 'sending' so cancel cannot race
             claimed = self.repo.db.execute(
-                "UPDATE reply_log SET status = 'pending' WHERE id = ? AND status IN ('pending', 'retrying')",
+                "UPDATE reply_log SET status = 'sending' WHERE id = ? AND status IN ('pending', 'retrying')",
                 (reply_id,),
             ).rowcount
             self.repo.db.commit()

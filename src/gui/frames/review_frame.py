@@ -365,6 +365,15 @@ class ReviewFrame(ctk.CTkFrame):
                 self._show_error("找不到指定貼文")
                 return
 
+            # Guard: prevent duplicate replies for the same post
+            existing = self.app.repo.db.execute(
+                "SELECT id FROM reply_log WHERE detected_post_id = ? AND status IN ('pending', 'sending', 'retrying', 'sent')",
+                (post_id,),
+            ).fetchone()
+            if existing:
+                self._show_error("此貼文已有排程或已送出的回覆")
+                return
+
             content = reply_content or template.content
 
             from src.data.models import ReplyLog

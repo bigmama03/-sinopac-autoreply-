@@ -2,6 +2,7 @@
 
 import json
 import platform as _platform
+import threading
 import tkinter as tk
 from datetime import date, datetime, timedelta
 import customtkinter as ctk
@@ -473,10 +474,16 @@ class DashboardFrame(ctk.CTkFrame):
         if scheduler.is_running:
             self._patrol_btn.configure(text="停止中...", state="disabled")
             self.update_idletasks()
-            try:
-                scheduler.stop()
-            finally:
-                self._patrol_btn.configure(state="normal")
+
+            def _stop_in_bg():
+                try:
+                    scheduler.stop()
+                finally:
+                    self.app.run_in_gui(lambda: self._patrol_btn.configure(state="normal"))
+                    self.app.run_in_gui(self._update_patrol_ui)
+
+            threading.Thread(target=_stop_in_bg, daemon=True).start()
+            return
         else:
             configured_platforms = []
             all_platforms = [p for p in self._PATROL_PLATFORMS if p not in self._COMING_SOON_PLATS]

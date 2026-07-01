@@ -16,7 +16,7 @@ except ImportError:
 
 class RepliesFrame(ctk.CTkFrame):
     _STATUS_ZH = {
-        "pending": "待送出", "sent": "已送出",
+        "pending": "待送出", "sending": "發送中", "sent": "已送出",
         "failed": "失敗", "retrying": "重試中",
         "cancelled": "已取消",
     }
