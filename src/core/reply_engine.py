@@ -172,11 +172,17 @@ class ReplyEngine:
         """Send all pending replies. Returns number sent."""
         sent_count = 0
 
+        # Recover stale 'sending' rows from previous crash/restart
+        self.repo.db.execute(
+            "UPDATE reply_log SET status = 'retrying' WHERE status = 'sending'"
+        )
+        self.repo.db.commit()
+
         rows = self.repo.db.execute(
             """SELECT rl.*, dp.platform_post_id
                FROM reply_log rl
                JOIN detected_posts dp ON rl.detected_post_id = dp.id
-               WHERE rl.status IN ('pending', 'retrying', 'sending')
+               WHERE rl.status IN ('pending', 'retrying')
                ORDER BY rl.created_at ASC"""
         ).fetchall()
 

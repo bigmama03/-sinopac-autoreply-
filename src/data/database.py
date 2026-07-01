@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS reply_log (
     reply_mode          TEXT NOT NULL CHECK(reply_mode IN ('semi_auto', 'full_auto')),
     platform_reply_id   TEXT,
     status              TEXT NOT NULL DEFAULT 'pending'
-                        CHECK(status IN ('pending', 'sent', 'failed', 'retrying', 'cancelled')),
+                        CHECK(status IN ('pending', 'sending', 'sent', 'failed', 'retrying', 'cancelled')),
     error_message       TEXT,
     retry_count         INTEGER DEFAULT 0,
     sent_at             TEXT,
@@ -234,13 +234,7 @@ class Database:
         row = cursor.fetchone()
         current_version = row[0] if row[0] is not None else 0
 
-        if current_version < SCHEMA_VERSION:
-            cursor.execute(
-                "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
-                (SCHEMA_VERSION, "Initial schema"),
-            )
-
-        # Run pending migrations
+        # Run pending migrations first, record version only after success
         for ver, desc, statements in _MIGRATIONS:
             if current_version < ver:
                 for sql in statements:
@@ -252,6 +246,13 @@ class Database:
                     "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
                     (ver, desc),
                 )
+
+        # Record current schema version for fresh databases
+        if current_version == 0:
+            cursor.execute(
+                "INSERT OR REPLACE INTO schema_version (version, description) VALUES (?, ?)",
+                (SCHEMA_VERSION, "Initial schema"),
+            )
 
         # Seed default data using INSERT OR IGNORE to avoid race conditions
         from config import DEFAULT_SETTINGS, DEFAULT_KEYWORDS, PLATFORMS

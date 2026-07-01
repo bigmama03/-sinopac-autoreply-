@@ -358,7 +358,12 @@ class BrowserManager:
         acquired = self._lock.acquire(timeout=timeout)
         if not acquired:
             logger.warning("BrowserManager.close() could not acquire lock "
-                           "(patrol thread likely active); skipping teardown")
+                           "(patrol thread likely active); marking browser invalid")
+            # Mark invalid so next operation recreates instead of reusing stale state
+            self._browser = None
+            self._pw = None
+            self._contexts.clear()
+            self._browser_tid = None
             return
         try:
             self._teardown_browser()

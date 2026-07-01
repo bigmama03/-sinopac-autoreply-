@@ -21,8 +21,9 @@ class RepliesFrame(ctk.CTkFrame):
         "cancelled": "已取消",
     }
     _STATUS_FILTER_MAP = {
-        "全部": None, "待送出": "pending", "已送出": "sent",
-        "失敗": "failed", "重試中": "retrying", "已取消": "cancelled",
+        "全部": None, "待送出": "pending", "發送中": "sending",
+        "已送出": "sent", "失敗": "failed", "重試中": "retrying",
+        "已取消": "cancelled",
     }
 
     def __init__(self, parent, app):

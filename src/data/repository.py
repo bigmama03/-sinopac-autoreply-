@@ -111,6 +111,23 @@ class Repository:
         )
         self.db.commit()
 
+    def batch_update_post_status(self, post_ids: list[int], status: str) -> int:
+        """Update status for multiple pending posts at once. Returns count updated.
+
+        Only updates posts still in 'pending' status to prevent overwriting
+        posts concurrently approved/replied by another operation.
+        """
+        if not post_ids:
+            return 0
+        placeholders = ",".join("?" for _ in post_ids)
+        cursor = self.db.execute(
+            f"UPDATE detected_posts SET status = ?, reviewed_at = datetime('now', 'localtime') "
+            f"WHERE id IN ({placeholders}) AND status = 'pending'",
+            (status, *post_ids),
+        )
+        self.db.commit()
+        return cursor.rowcount
+
     def delete_detected_posts(self, post_ids: list[int]) -> int:
         """Delete detected posts and their associated reply logs. Returns count deleted."""
         if not post_ids:
