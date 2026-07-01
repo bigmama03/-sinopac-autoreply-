@@ -1,4 +1,4 @@
-"""Monitor frame — shows detected posts from patrol."""
+"""Monitor frame — shows detected posts from patrol with inline review for pending posts."""
 
 import io
 import json
@@ -46,6 +46,12 @@ class MonitorFrame(ctk.CTkFrame):
             font=T.font_small(),
         )
         self._patrol_indicator.pack(side="right", padx=T.PAD_MD)
+
+        self._shortcut_label = ctk.CTkLabel(
+            header, text="", font=T.font_caption(),
+            text_color=T.TEXT_TERTIARY,
+        )
+        self._shortcut_label.pack(side="right")
 
         # Filter row
         filter_row = ctk.CTkFrame(self, fg_color=T.BG_CARD, corner_radius=T.RADIUS_MD,
@@ -131,6 +137,13 @@ class MonitorFrame(ctk.CTkFrame):
         )
         self._batch_delete_btn.pack(side="left", padx=T.PAD_SM)
 
+        self._batch_reject_btn = ctk.CTkButton(
+            batch_row, text="批次拒絕", width=90, height=28,
+            **T.BTN_GHOST_DANGER,
+            command=self._batch_reject,
+        )
+        self._batch_reject_btn.pack(side="left", padx=(0, T.PAD_SM))
+
         self._batch_skip_btn = ctk.CTkButton(
             batch_row, text="批次跳過", width=90, height=28,
             **T.BTN_GHOST,
@@ -154,6 +167,12 @@ class MonitorFrame(ctk.CTkFrame):
         self._page_size = 30
         self._displayed = 0
         self._check_vars: dict[int, ctk.StringVar] = {}
+
+        # Review state for pending cards
+        self._card_data: list[dict] = []
+        self._selected_index = 0
+        self._templates_cache = []
+        self._keys_bound = False
 
         # Bottom panel: browser preview (left) + patrol log (right)
         bottom_panel = ctk.CTkFrame(self, fg_color="transparent")
@@ -226,10 +245,58 @@ class MonitorFrame(ctk.CTkFrame):
         self._patrol_log_lines: list[str] = []
         self._max_log_lines = 200
 
+        self.bind("<Map>", lambda e: self._on_visible())
+        self.bind("<Unmap>", lambda e: self._unbind_keys())
+
     _STATUS_PRIORITY = {
         "pending": 0, "approved": 1, "failed": 2,
         "replied": 3, "skipped": 4, "rejected": 5,
     }
+
+    # ── Visibility & keyboard ──
+
+    def _on_visible(self, event=None):
+        self._bind_keys_if_pending()
+
+    def _bind_keys_if_pending(self):
+        if self._keys_bound:
+            return
+        top = self.winfo_toplevel()
+        top.bind("<a>", lambda e: self._key_approve())
+        top.bind("<A>", lambda e: self._key_approve())
+        top.bind("<r>", lambda e: self._key_reject())
+        top.bind("<R>", lambda e: self._key_reject())
+        top.bind("<s>", lambda e: self._key_skip())
+        top.bind("<S>", lambda e: self._key_skip())
+        top.bind("<Up>", lambda e: self._move_selection(-1))
+        top.bind("<Down>", lambda e: self._move_selection(1))
+        self._keys_bound = True
+
+    def _unbind_keys(self):
+        if not self._keys_bound:
+            return
+        top = self.winfo_toplevel()
+        for key in ("<a>", "<A>", "<r>", "<R>", "<s>", "<S>", "<Up>", "<Down>"):
+            top.unbind(key)
+        self._keys_bound = False
+
+    def _is_typing(self) -> bool:
+        focus = self.winfo_toplevel().focus_get()
+        if focus is None:
+            return False
+        if isinstance(focus, (ctk.CTkTextbox, ctk.CTkEntry, ctk.CTkOptionMenu)):
+            return True
+        # CTkOptionMenu dropdown uses internal Tk widgets — check parent chain
+        widget = focus
+        for _ in range(5):
+            widget = getattr(widget, "master", None)
+            if widget is None:
+                break
+            if isinstance(widget, ctk.CTkOptionMenu):
+                return True
+        return False
+
+    # ── Refresh & filter ──
 
     def refresh(self):
         if hasattr(self.app, "_patrol_log_buffer") and self.app._patrol_log_buffer:
@@ -243,6 +310,8 @@ class MonitorFrame(ctk.CTkFrame):
         else:
             self._patrol_indicator.configure(text="")
             self._stop_preview_polling()
+
+        self._templates_cache = self.app.template_manager.get_all()
 
         self._all_posts = []
         for s in ("pending", "approved", "replied", "rejected", "failed", "skipped"):
@@ -285,12 +354,22 @@ class MonitorFrame(ctk.CTkFrame):
         self._select_all_var.set("0")
         self._update_selected_count()
 
+        # Clear review state
+        self._card_data.clear()
+        self._selected_index = 0
+
         for w in self._post_widgets:
             w.destroy()
         self._post_widgets.clear()
 
         total = len(self._all_posts)
         self._status_label.configure(text=f"共 {total} 筆")
+
+        # Show shortcut hint when pending posts are visible
+        has_pending = any(p.status == "pending" for p in posts)
+        self._shortcut_label.configure(
+            text="快捷鍵: A 核准 / R 拒絕 / S 跳過 / ↑↓ 切換" if has_pending else ""
+        )
 
         if not posts:
             self._count_label.configure(text=f"顯示 0 / 共 {total} 筆")
@@ -331,6 +410,8 @@ class MonitorFrame(ctk.CTkFrame):
             return
 
         self._load_more()
+        if self._card_data:
+            self._highlight_selected()
 
     def _load_more(self):
         posts = self._filtered_posts
@@ -362,11 +443,18 @@ class MonitorFrame(ctk.CTkFrame):
             btn.grid(row=self._displayed, column=0, pady=T.PAD_MD)
             self._post_widgets.append(btn)
 
+    # ── Card rendering ──
+
     def _create_post_card(self, post, index: int) -> ctk.CTkFrame:
         card = T.card_frame(self._scroll_frame,
                             row=index, column=0, sticky="ew",
                             pady=T.PAD_XS, padx=2)
         card.grid_columnconfigure(1, weight=1)
+
+        is_pending = post.status == "pending"
+
+        if is_pending:
+            card.bind("<Button-1>", lambda e, idx=len(self._card_data): self._select_card(idx))
 
         # Checkbox
         var = ctk.StringVar(value="0")
@@ -378,9 +466,9 @@ class MonitorFrame(ctk.CTkFrame):
             fg_color=T.GOLD_500, hover_color=T.GOLD_400,
             checkmark_color=T.TEXT_INVERSE,
         )
-        cb.grid(row=0, column=0, rowspan=3, padx=(T.PAD_SM, 0), pady=T.PAD_SM, sticky="n")
+        cb.grid(row=0, column=0, rowspan=8, padx=(T.PAD_SM, 0), pady=T.PAD_SM, sticky="n")
 
-        # Header: platform + author + time + status
+        # Header: platform + author + time + status + score
         header = ctk.CTkFrame(card, fg_color="transparent")
         header.grid(row=0, column=1, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_SM, T.PAD_XS))
 
@@ -425,9 +513,9 @@ class MonitorFrame(ctk.CTkFrame):
             wraplength=700, font=T.font_body(),
         ).grid(row=1, column=1, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_XS, T.PAD_XS))
 
-        # Footer: keywords + actions
+        # Footer: keywords + view original
         footer = ctk.CTkFrame(card, fg_color="transparent")
-        footer.grid(row=2, column=1, sticky="ew", padx=T.PAD_MD, pady=(0, T.PAD_SM))
+        footer.grid(row=2, column=1, sticky="ew", padx=T.PAD_MD, pady=(0, T.PAD_XS))
 
         keywords = self._parse_keywords(post.matched_keywords)
         if keywords:
@@ -456,11 +544,247 @@ class MonitorFrame(ctk.CTkFrame):
             ctk.CTkButton(
                 footer, text="查看原文", width=70, height=24,
                 font=T.font_caption(),
-                **T.BTN_GHOST,
+                **T.BTN_GHOST_ACCENT,
                 command=lambda url=post.post_url: webbrowser.open(url),
             ).pack(side="right")
 
+        # ── Pending-only: review UI ──
+        if is_pending:
+            self._build_review_section(card, post, index)
+
         return card
+
+    def _build_review_section(self, card, post, index: int):
+        """Add template selector, reply preview, and action buttons to a pending post card."""
+        templates = list(self._templates_cache)
+        if post.recommended_template_id:
+            rec = next((t for t in templates if t.id == post.recommended_template_id), None)
+            if rec:
+                templates = [rec] + [t for t in templates if t.id != rec.id]
+
+        rec_id = post.recommended_template_id
+        template_options = [
+            f"{'* ' if t.id == rec_id else ''}[{t.template_code}] {t.content[:50]}..."
+            for t in templates
+        ]
+        template_ids = [t.id for t in templates]
+
+        # Template selector
+        select_frame = ctk.CTkFrame(card, fg_color="transparent")
+        select_frame.grid(row=3, column=1, sticky="ew", padx=T.PAD_MD, pady=(0, T.PAD_XS))
+
+        template_hint = "文案:" if not rec_id else "文案 (* 推薦):"
+        ctk.CTkLabel(select_frame, text=template_hint, font=T.font_small(),
+                     text_color=T.TEXT_SECONDARY).pack(side="left")
+        template_var = ctk.StringVar(value=template_options[0] if template_options else "")
+        card_data_index = len(self._card_data)
+        ctk.CTkOptionMenu(
+            select_frame, values=template_options, variable=template_var, width=500,
+            command=lambda val, idx=card_data_index: self._on_template_change(idx),
+            fg_color=T.NAVY_700, button_color=T.NAVY_600,
+            button_hover_color=T.NAVY_500,
+            dropdown_fg_color=T.BG_ELEVATED,
+            text_color=T.TEXT_PRIMARY,
+        ).pack(side="left", padx=T.PAD_XS)
+
+        # Reply preview
+        ctk.CTkLabel(
+            card, text="回覆預覽:", font=T.font_card_title(),
+            text_color=T.TEXT_SECONDARY,
+        ).grid(row=4, column=1, sticky="w", padx=T.PAD_MD, pady=(T.PAD_XS, 0))
+
+        initial_content = templates[0].content if templates else ""
+        reply_textbox = ctk.CTkTextbox(
+            card, height=60, wrap="word",
+            fg_color=T.BG_INPUT, text_color=T.TEXT_PRIMARY,
+            border_width=1, border_color=T.BORDER_DEFAULT,
+            corner_radius=T.RADIUS_MD,
+        )
+        reply_textbox.grid(row=5, column=1, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_XS, T.PAD_XS))
+        reply_textbox.insert("0.0", initial_content)
+
+        edit_indicator = ctk.CTkLabel(
+            card, text="", font=T.font_caption(), text_color=T.WARNING,
+        )
+        edit_indicator.grid(row=4, column=1, sticky="e", padx=T.PAD_MD, pady=(T.PAD_XS, 0))
+        reply_textbox._original_content = initial_content
+        reply_textbox.bind("<KeyRelease>", lambda e, tb=reply_textbox, ind=edit_indicator: ind.configure(
+            text="(已編輯)" if tb.get("0.0", "end").strip() != tb._original_content else ""
+        ))
+
+        # Action buttons
+        btn_frame = ctk.CTkFrame(card, fg_color="transparent")
+        btn_frame.grid(row=6, column=1, sticky="ew", padx=T.PAD_MD, pady=(0, T.PAD_SM))
+
+        def get_reply_content():
+            return reply_textbox.get("0.0", "end").strip()
+
+        def approve():
+            idx = template_options.index(template_var.get()) if template_var.get() in template_options else 0
+            if idx < len(template_ids):
+                self._approve_post(post.id, template_ids[idx], get_reply_content())
+
+        ctk.CTkButton(
+            btn_frame, text="核准 (A)", width=100, height=30,
+            **T.BTN_SUCCESS,
+            command=approve,
+        ).pack(side="left", padx=(0, T.PAD_SM))
+
+        ctk.CTkButton(
+            btn_frame, text="跳過 (S)", width=80, height=30,
+            **T.BTN_GHOST,
+            command=lambda pid=post.id: self._skip_post(pid),
+        ).pack(side="left", padx=(0, T.PAD_SM))
+
+        ctk.CTkButton(
+            btn_frame, text="拒絕 (R)", width=80, height=30,
+            **T.BTN_GHOST_DANGER,
+            command=lambda pid=post.id: self._reject_post(pid),
+        ).pack(side="left")
+
+        self._card_data.append({
+            "post": post,
+            "card": card,
+            "template_var": template_var,
+            "template_options": template_options,
+            "template_ids": template_ids,
+            "templates": templates,
+            "reply_textbox": reply_textbox,
+            "edit_indicator": edit_indicator,
+            "approve_fn": approve,
+        })
+
+    def _on_template_change(self, card_index: int):
+        if card_index >= len(self._card_data):
+            return
+        data = self._card_data[card_index]
+        selected = data["template_var"].get()
+        options = data["template_options"]
+        templates = data["templates"]
+        try:
+            idx = options.index(selected)
+            content = templates[idx].content if idx < len(templates) else ""
+        except ValueError:
+            content = ""
+        textbox = data["reply_textbox"]
+        textbox.delete("0.0", "end")
+        textbox.insert("0.0", content)
+        textbox._original_content = content
+        data["edit_indicator"].configure(text="")
+
+    # ── Card selection (pending cards only) ──
+
+    def _select_card(self, index: int):
+        self._selected_index = index
+        self._highlight_selected()
+
+    def _move_selection(self, delta: int):
+        if self._is_typing() or not self._card_data:
+            return
+        new_idx = self._selected_index + delta
+        new_idx = max(0, min(new_idx, len(self._card_data) - 1))
+        self._selected_index = new_idx
+        self._highlight_selected()
+
+    def _highlight_selected(self):
+        for i, data in enumerate(self._card_data):
+            if i == self._selected_index:
+                data["card"].configure(border_width=2, border_color=T.GOLD_500)
+            else:
+                data["card"].configure(border_width=1, border_color=T.BORDER_SUBTLE)
+
+    def _key_approve(self):
+        if self._is_typing() or not self._card_data:
+            return
+        if self._selected_index < len(self._card_data):
+            self._card_data[self._selected_index]["approve_fn"]()
+
+    def _key_reject(self):
+        if self._is_typing() or not self._card_data:
+            return
+        if self._selected_index < len(self._card_data):
+            post = self._card_data[self._selected_index]["post"]
+            self._reject_post(post.id)
+
+    def _key_skip(self):
+        if self._is_typing() or not self._card_data:
+            return
+        if self._selected_index < len(self._card_data):
+            post = self._card_data[self._selected_index]["post"]
+            self._skip_post(post.id)
+
+    # ── Review actions ──
+
+    def _approve_post(self, post_id: int, template_id: int, reply_content: str = ""):
+        try:
+            template = self.app.template_manager.get_by_id(template_id)
+            if not template:
+                self._show_error("找不到指定文案")
+                return
+
+            post_row = self.app.repo.db.execute(
+                "SELECT platform FROM detected_posts WHERE id = ?", (post_id,)
+            ).fetchone()
+            if not post_row:
+                self._show_error("找不到指定貼文")
+                return
+
+            # Guard: prevent duplicate replies
+            existing = self.app.repo.db.execute(
+                "SELECT id FROM reply_log WHERE detected_post_id = ? AND status IN ('pending', 'sending', 'retrying', 'sent')",
+                (post_id,),
+            ).fetchone()
+            if existing:
+                self._show_error("此貼文已有排程或已送出的回覆")
+                return
+
+            content = reply_content or template.content
+
+            from src.data.models import ReplyLog
+            reply = ReplyLog(
+                detected_post_id=post_id,
+                template_id=template_id,
+                platform=post_row["platform"],
+                reply_content=content,
+                reply_mode="semi_auto",
+                status="pending",
+            )
+            self.app.repo.insert_reply_log(reply)
+            self.app.repo.update_post_status(post_id, "approved")
+            self.app.repo.log_audit("REPLY_APPROVED", {
+                "post_id": post_id, "template_id": template_id,
+            })
+            show_toast(self, "已核准，回覆將自動送出", "success")
+        except Exception as e:
+            self._show_error(f"核准失敗: {e}")
+        self.refresh()
+        self.app._update_sidebar_badges()
+
+    def _skip_post(self, post_id: int):
+        try:
+            self.app.repo.update_post_status(post_id, "skipped")
+            self.app.repo.log_audit("POST_SKIPPED", {"post_id": post_id})
+            show_toast(self, "已跳過", "info")
+        except Exception as e:
+            self._show_error(f"操作失敗: {e}")
+        self.refresh()
+        self.app._update_sidebar_badges()
+
+    def _reject_post(self, post_id: int):
+        try:
+            self.app.repo.update_post_status(post_id, "rejected")
+            self.app.repo.log_audit("POST_REJECTED", {"post_id": post_id})
+            show_toast(self, "已拒絕", "warning")
+        except Exception as e:
+            self._show_error(f"操作失敗: {e}")
+        self.refresh()
+        self.app._update_sidebar_badges()
+
+    def _show_error(self, msg: str):
+        if CTkMessagebox:
+            CTkMessagebox(title="錯誤", message=msg, icon="cancel")
+
+    # ── Batch operations ──
 
     def _get_selected_ids(self) -> list[int]:
         return [pid for pid, var in self._check_vars.items() if var.get() == "1"]
@@ -495,16 +819,45 @@ class MonitorFrame(ctk.CTkFrame):
         self.app.repo.log_audit("BATCH_DELETE_POSTS", {"count": deleted, "post_ids": ids})
         show_toast(self, f"已刪除 {deleted} 筆貼文", "success")
         self.refresh()
+        self.app._update_sidebar_badges()
+
+    def _batch_reject(self):
+        ids = self._get_selected_ids()
+        if not ids:
+            return
+        if CTkMessagebox:
+            result = CTkMessagebox(
+                title="批次拒絕",
+                message=f"確定要拒絕 {len(ids)} 則貼文嗎？",
+                icon="question",
+                option_1="取消", option_2="確定拒絕",
+            ).get()
+            if result != "確定拒絕":
+                return
+        count = self.app.repo.batch_update_post_status(ids, "rejected")
+        self.app.repo.log_audit("BATCH_REJECTED", {"count": count, "post_ids": ids})
+        show_toast(self, f"已批次拒絕 {count} 則貼文", "success")
+        self.refresh()
+        self.app._update_sidebar_badges()
 
     def _batch_skip(self):
         ids = self._get_selected_ids()
         if not ids:
             return
-        for pid in ids:
-            self.app.repo.update_post_status(pid, "skipped")
-        self.app.repo.log_audit("BATCH_SKIP_POSTS", {"count": len(ids)})
-        show_toast(self, f"已跳過 {len(ids)} 筆貼文", "info")
+        if CTkMessagebox:
+            result = CTkMessagebox(
+                title="批次跳過",
+                message=f"確定要跳過 {len(ids)} 則貼文嗎？",
+                icon="question",
+                option_1="取消", option_2="確定跳過",
+            ).get()
+            if result != "確定跳過":
+                return
+        count = self.app.repo.batch_update_post_status(ids, "skipped")
+        self.app.repo.log_audit("BATCH_SKIPPED", {"count": count, "post_ids": ids})
+        show_toast(self, f"已批次跳過 {count} 則貼文", "info")
         self.refresh()
+        self.app._update_sidebar_badges()
 
     def _parse_keywords(self, raw) -> list[str]:
         if not raw:
@@ -599,3 +952,8 @@ class MonitorFrame(ctk.CTkFrame):
             self._preview_label.configure(text="海巡未啟動")
             self._preview_image = None
             self.app.browser_manager.clear_screenshot()
+
+    def destroy(self):
+        self._unbind_keys()
+        self._stop_preview_polling()
+        super().destroy()

@@ -181,10 +181,10 @@ class RepliesFrame(ctk.CTkFrame):
                 justify="center",
             ).pack(pady=(0, T.PAD_MD))
             ctk.CTkButton(
-                empty_frame, text="前往審核佇列",
+                empty_frame, text="前往海巡監測",
                 width=140, height=32,
                 **T.BTN_GHOST_ACCENT,
-                command=lambda: self.app._show_frame("review"),
+                command=lambda: self.app._show_frame("monitor"),
             ).pack()
             self._reply_widgets.append(empty_frame)
             return
@@ -364,7 +364,7 @@ class RepliesFrame(ctk.CTkFrame):
         if CTkMessagebox:
             msg = CTkMessagebox(
                 title="確認取消",
-                message="確定要取消這則待送出的回覆？\n貼文將回到審核佇列。",
+                message="確定要取消這則待送出的回覆？\n貼文將回到待處理狀態。",
                 icon="warning",
                 option_1="取消", option_2="確定",
             )
@@ -382,7 +382,7 @@ class RepliesFrame(ctk.CTkFrame):
         self.app.repo.log_audit("REPLY_CANCELLED", {
             "reply_id": reply_id, "post_id": post_id,
         })
-        show_toast(self, "已取消，貼文已回到審核佇列", "success")
+        show_toast(self, "已取消，貼文已回到待處理", "success")
         self.refresh()
 
     def _delete_reply(self, reply_id: int, platform_reply_id: str, platform: str):

@@ -196,7 +196,7 @@ class DashboardFrame(ctk.CTkFrame):
         # ── Row 1: Stat cards ──
         self._cards: dict[str, ctk.CTkLabel] = {}
         card_configs = [
-            ("pending_count", "待審核貼文", "0", "review", T.WARNING),
+            ("pending_count", "待審核貼文", "0", "monitor", T.WARNING),
             ("replied_today", "今日已回覆", "0", "replies", T.TEAL_500),
             ("template_count", "文案數量", "0", "templates", T.GOLD_500),
         ]
