@@ -131,14 +131,19 @@ class PatrolScheduler:
             if not (self._scheduler and self._running):
                 return
             scheduler = self._scheduler
-            session_id = self._session_id
             self._scheduler = None
             self._running = False
             self._sending_paused = False
-            self._session_id = None
+            # Keep self._session_id alive so in-flight jobs can still
+            # update session counts during scheduler.shutdown(wait=True).
 
         scheduler.shutdown(wait=wait)
         self.repo.set_setting("sending_paused", "0")
+
+        # Snapshot and clear _session_id after shutdown so no in-flight
+        # job references are lost.
+        session_id = self._session_id
+        self._session_id = None
 
         if session_id:
             self.repo.stop_patrol_session(session_id)
