@@ -1,6 +1,7 @@
 """APScheduler-based polling orchestrator for patrol + reply."""
 
 import logging
+import threading
 from typing import Optional, Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -36,6 +37,7 @@ class PatrolScheduler:
         self._session_id: Optional[int] = None
         self.active_platforms: Optional[list[str]] = None
         self._browser_manager = browser_manager
+        self._state_lock = threading.Lock()
 
     @property
     def is_running(self) -> bool:
@@ -124,24 +126,28 @@ class PatrolScheduler:
         logger.info("Patrol started (session %d): %s", self._session_id, platforms)
 
     def stop(self, wait: bool = True):
-        if self._scheduler and self._running:
-            self._scheduler.shutdown(wait=wait)
+        with self._state_lock:
+            if not (self._scheduler and self._running):
+                return
+            scheduler = self._scheduler
             self._scheduler = None
             self._running = False
             self._sending_paused = False
-            self.repo.set_setting("sending_paused", "0")
 
-            if self._session_id:
-                self.repo.stop_patrol_session(self._session_id)
-                self.repo.log_audit("PATROL_STOPPED", {
-                    "session_id": self._session_id,
-                })
-                logger.info("Patrol stopped (session %d)", self._session_id)
-                self._session_id = None
-            else:
-                self.repo.log_audit("PATROL_STOPPED", {})
-                logger.info("Patrol stopped")
-            self._emit_log("info", "海巡已停止")
+        scheduler.shutdown(wait=wait)
+        self.repo.set_setting("sending_paused", "0")
+
+        if self._session_id:
+            self.repo.stop_patrol_session(self._session_id)
+            self.repo.log_audit("PATROL_STOPPED", {
+                "session_id": self._session_id,
+            })
+            logger.info("Patrol stopped (session %d)", self._session_id)
+            self._session_id = None
+        else:
+            self.repo.log_audit("PATROL_STOPPED", {})
+            logger.info("Patrol stopped")
+        self._emit_log("info", "海巡已停止")
 
     def pause_sending(self):
         """Pause the reply sending job."""

@@ -75,12 +75,13 @@ class _ChannelSelectDialog(ctk.CTkToplevel):
         ).pack(side="right")
 
         self.protocol("WM_DELETE_WINDOW", self._cancel)
-        self.update_idletasks()
-        self._center_on_parent(parent)
+        self.after(10, lambda: self._center_on_parent(parent))
         self.grab_set()
 
     def _center_on_parent(self, parent):
-        parent.update_idletasks()
+        if not self.winfo_exists():
+            return
+        self.update_idletasks()
         width = self.winfo_width()
         height = self.winfo_height()
         parent_width = parent.winfo_width()
@@ -473,7 +474,6 @@ class DashboardFrame(ctk.CTkFrame):
         scheduler = self.app.scheduler
         if scheduler.is_running:
             self._patrol_btn.configure(text="停止中...", state="disabled")
-            self.update_idletasks()
 
             def _stop_in_bg():
                 try:
@@ -481,6 +481,7 @@ class DashboardFrame(ctk.CTkFrame):
                 finally:
                     self.app.run_in_gui(lambda: self._patrol_btn.configure(state="normal"))
                     self.app.run_in_gui(self._update_patrol_ui)
+                    self.app.run_in_gui(self._sync_monitor)
 
             threading.Thread(target=_stop_in_bg, daemon=True).start()
             return
@@ -517,13 +518,19 @@ class DashboardFrame(ctk.CTkFrame):
                 return
 
             self._patrol_btn.configure(text="啟動中...", state="disabled")
-            self.update_idletasks()
             try:
                 scheduler.start(platforms=dialog.result)
             finally:
                 self._patrol_btn.configure(state="normal")
 
         self._update_patrol_ui()
+        self._sync_monitor()
+
+    def _sync_monitor(self):
+        if "monitor" in self.app._frames:
+            frame = self.app._frames["monitor"]
+            if hasattr(frame, "_update_patrol_ui"):
+                frame._update_patrol_ui()
 
     def _toggle_sending(self):
         scheduler = self.app.scheduler
@@ -532,6 +539,13 @@ class DashboardFrame(ctk.CTkFrame):
         else:
             scheduler.pause_sending()
         self._update_sending_btn()
+        self._sync_monitor_sending()
+
+    def _sync_monitor_sending(self):
+        if "monitor" in self.app._frames:
+            frame = self.app._frames["monitor"]
+            if hasattr(frame, "_update_sending_btn"):
+                frame._update_sending_btn()
 
     def _update_sending_btn(self):
         scheduler = self.app.scheduler
