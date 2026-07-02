@@ -181,10 +181,10 @@ class RepliesFrame(ctk.CTkFrame):
                 justify="center",
             ).pack(pady=(0, T.PAD_MD))
             ctk.CTkButton(
-                empty_frame, text="前往海巡監測",
+                empty_frame, text="前往審核佇列",
                 width=140, height=32,
                 **T.BTN_GHOST_ACCENT,
-                command=lambda: self.app._show_frame("monitor"),
+                command=lambda: self.app._show_frame("review"),
             ).pack()
             self._reply_widgets.append(empty_frame)
             return

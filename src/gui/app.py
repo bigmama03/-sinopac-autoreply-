@@ -131,6 +131,7 @@ class App(ctk.CTk):
         nav_items = [
             ("總覽儀表板", "dashboard"),
             ("海巡監測", "monitor"),
+            ("審核佇列", "review"),
             ("回覆紀錄", "replies"),
             ("文案管理", "templates"),
             ("關鍵字管理", "keywords"),
@@ -158,9 +159,9 @@ class App(ctk.CTk):
             btn.grid(row=0, column=0, sticky="ew")
             self._nav_buttons[name] = btn
 
-            # Badge placeholders for monitor (pending posts) and replies
-            if name in ("monitor", "replies"):
-                badge_color = T.ERROR if name == "monitor" else T.WARNING
+            # Badge placeholders for review queue and replies
+            if name in ("review", "replies"):
+                badge_color = T.ERROR if name == "review" else T.WARNING
                 badge = ctk.CTkLabel(
                     row_frame, text="", width=26, height=18,
                     corner_radius=T.RADIUS_PILL, font=T.font_badge(),
@@ -208,6 +209,9 @@ class App(ctk.CTk):
         elif name == "monitor":
             from src.gui.frames.monitor_frame import MonitorFrame
             return MonitorFrame(self.content_container, self)
+        elif name == "review":
+            from src.gui.frames.review_frame import ReviewFrame
+            return ReviewFrame(self.content_container, self)
         elif name == "replies":
             from src.gui.frames.replies_frame import RepliesFrame
             return RepliesFrame(self.content_container, self)
@@ -272,15 +276,15 @@ class App(ctk.CTk):
             pass
 
     def _update_sidebar_badges(self):
-        """Update the pending count badges on monitor and replies nav items."""
-        monitor_badge = self._nav_badges.get("monitor")
-        if monitor_badge:
+        """Update the pending count badges on review and replies nav items."""
+        review_badge = self._nav_badges.get("review")
+        if review_badge:
             count = self.repo.count_posts_by_status("pending")
             if count > 0:
-                monitor_badge.configure(text=str(count) if count < 100 else "99+")
-                monitor_badge.grid()
+                review_badge.configure(text=str(count) if count < 100 else "99+")
+                review_badge.grid()
             else:
-                monitor_badge.grid_remove()
+                review_badge.grid_remove()
 
         replies_badge = self._nav_badges.get("replies")
         if replies_badge:
@@ -323,7 +327,7 @@ class App(ctk.CTk):
 
     def _on_new_posts(self, count: int):
         """Called when new posts are detected by patrol."""
-        for name in ("dashboard", "monitor"):
+        for name in ("dashboard", "monitor", "review"):
             if name in self._frames:
                 frame = self._frames[name]
                 if hasattr(frame, "refresh"):
@@ -335,7 +339,7 @@ class App(ctk.CTk):
         if mode == "semi_auto":
             self._send_notification(
                 title="新的待審核貼文",
-                message=f"偵測到 {count} 則新的相關貼文，請前往海巡監測處理",
+                message=f"偵測到 {count} 則新的相關貼文，請前往審核佇列處理",
             )
 
     def _on_shadowban(self, platform: str, hidden_count: int):

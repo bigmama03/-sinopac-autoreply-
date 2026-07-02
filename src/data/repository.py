@@ -155,6 +155,43 @@ class Repository:
         ).fetchone()
         return row is not None
 
+    def get_posts_filtered(
+        self,
+        status: str | None = None,
+        platform: str | None = None,
+        search: str | None = None,
+        limit: int = 200,
+    ) -> tuple[list[DetectedPost], int]:
+        """Query posts with optional filters. Returns (posts, total_unfiltered_count)."""
+        # Total count (unfiltered)
+        total = self.db.execute("SELECT COUNT(*) FROM detected_posts").fetchone()[0]
+
+        clauses: list[str] = []
+        params: list = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if platform:
+            clauses.append("platform = ?")
+            params.append(platform)
+        if search:
+            escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clauses.append("(post_content LIKE ? ESCAPE '\\' OR author_username LIKE ? ESCAPE '\\')")
+            params.extend([f"%{escaped}%", f"%{escaped}%"])
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        rows = self.db.execute(
+            f"SELECT * FROM detected_posts {where} "
+            "ORDER BY CASE status "
+            "  WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 WHEN 'failed' THEN 2 "
+            "  WHEN 'replied' THEN 3 WHEN 'skipped' THEN 4 WHEN 'rejected' THEN 5 "
+            "  ELSE 9 END, detected_at DESC "
+            "LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        return [self._row_to_post(r) for r in rows], total
+
     def count_posts_by_status(self, status: str) -> int:
         row = self.db.execute(
             "SELECT COUNT(*) FROM detected_posts WHERE status = ?", (status,)
