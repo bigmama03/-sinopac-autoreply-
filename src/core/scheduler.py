@@ -48,13 +48,14 @@ class PatrolScheduler:
         return self._sending_paused
 
     def start(self, platforms: Optional[list[str]] = None):
-        if self._running:
-            return
+        with self._state_lock:
+            if self._running:
+                return
 
-        # Early reject empty selection
-        if platforms is not None and len(platforms) == 0:
-            logger.warning("No platforms selected")
-            return
+            # Early reject empty selection
+            if platforms is not None and len(platforms) == 0:
+                logger.warning("No platforms selected")
+                return
 
         # Register platform adapters on the injected reply engine.
         # Build into a temp dict first; only replace on success.
@@ -130,20 +131,21 @@ class PatrolScheduler:
             if not (self._scheduler and self._running):
                 return
             scheduler = self._scheduler
+            session_id = self._session_id
             self._scheduler = None
             self._running = False
             self._sending_paused = False
+            self._session_id = None
 
         scheduler.shutdown(wait=wait)
         self.repo.set_setting("sending_paused", "0")
 
-        if self._session_id:
-            self.repo.stop_patrol_session(self._session_id)
+        if session_id:
+            self.repo.stop_patrol_session(session_id)
             self.repo.log_audit("PATROL_STOPPED", {
-                "session_id": self._session_id,
+                "session_id": session_id,
             })
-            logger.info("Patrol stopped (session %d)", self._session_id)
-            self._session_id = None
+            logger.info("Patrol stopped (session %d)", session_id)
         else:
             self.repo.log_audit("PATROL_STOPPED", {})
             logger.info("Patrol stopped")

@@ -61,18 +61,21 @@ class _ChannelSelectDialog(ctk.CTkToplevel):
         self.grab_set()
 
     def _center_on_parent(self, parent):
-        if not self.winfo_exists():
-            return
-        self.update_idletasks()
-        w, h = self.winfo_width(), self.winfo_height()
-        pw, ph = parent.winfo_width(), parent.winfo_height()
-        if parent.winfo_ismapped() and pw > 1 and ph > 1:
-            x = parent.winfo_rootx() + max((pw - w) // 2, 0)
-            y = parent.winfo_rooty() + max((ph - h) // 2, 0)
-        else:
-            x = (self.winfo_screenwidth() - w) // 2
-            y = (self.winfo_screenheight() - h) // 2
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        try:
+            if not self.winfo_exists():
+                return
+            self.update_idletasks()
+            w, h = self.winfo_width(), self.winfo_height()
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            if parent.winfo_ismapped() and pw > 1 and ph > 1:
+                x = parent.winfo_rootx() + max((pw - w) // 2, 0)
+                y = parent.winfo_rooty() + max((ph - h) // 2, 0)
+            else:
+                x = (self.winfo_screenwidth() - w) // 2
+                y = (self.winfo_screenheight() - h) // 2
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        except tk.TclError:
+            pass
 
     def _confirm(self):
         self.result = [p for p, v in self._vars.items() if v.get()]
