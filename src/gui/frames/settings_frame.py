@@ -210,19 +210,17 @@ class SettingsFrame(ctk.CTkFrame):
         self._entries["ollama_url"].configure(state="disabled")
         self._entries["ollama_model"].configure(state="disabled")
 
-        # Ollama system prompt (textbox)
+        # Ollama system prompt (textbox) — editable even when Ollama is disabled
         prompt_label_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         prompt_label_frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_XS, 0))
         ctk.CTkLabel(prompt_label_frame, text="AI 判斷 Prompt", width=180, anchor="w",
                      text_color=T.TEXT_SECONDARY, font=T.font_small()).pack(side="left")
 
-        prompt_reset_btn = ctk.CTkButton(
+        ctk.CTkButton(
             prompt_label_frame, text="恢復預設", width=70, height=24,
             **T.BTN_GHOST,
             command=self._reset_ollama_prompt,
-        )
-        prompt_reset_btn.pack(side="left", padx=T.PAD_SM)
-        self._disable_frame_children(prompt_label_frame)
+        ).pack(side="left", padx=T.PAD_SM)
         row += 1
 
         self._ollama_prompt_textbox = ctk.CTkTextbox(
@@ -232,7 +230,6 @@ class SettingsFrame(ctk.CTkFrame):
             corner_radius=T.RADIUS_MD,
         )
         self._ollama_prompt_textbox.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=(0, T.PAD_XS))
-        self._ollama_prompt_textbox.configure(state="disabled")
         row += 1
 
         test_btn_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -425,11 +422,11 @@ class SettingsFrame(ctk.CTkFrame):
 
         # Load Ollama prompt
         from config import DEFAULT_OLLAMA_PROMPT
-        prompt = repo.get_setting("ollama_system_prompt", DEFAULT_OLLAMA_PROMPT)
-        self._ollama_prompt_textbox.configure(state="normal")
+        prompt = repo.get_setting("ollama_system_prompt", "")
+        if not prompt:
+            prompt = DEFAULT_OLLAMA_PROMPT
         self._ollama_prompt_textbox.delete("0.0", "end")
         self._ollama_prompt_textbox.insert("0.0", prompt)
-        self._ollama_prompt_textbox.configure(state="disabled")
 
         from config import DEFAULT_SETTINGS
         for key in ("daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
@@ -540,9 +537,7 @@ class SettingsFrame(ctk.CTkFrame):
             repo.set_setting(key, val)
 
         # Save Ollama prompt
-        self._ollama_prompt_textbox.configure(state="normal")
         prompt_val = self._ollama_prompt_textbox.get("0.0", "end").strip()
-        self._ollama_prompt_textbox.configure(state="disabled")
         repo.set_setting("ollama_system_prompt", prompt_val)
 
         for key in numeric_keys:
@@ -629,10 +624,8 @@ class SettingsFrame(ctk.CTkFrame):
 
     def _reset_ollama_prompt(self):
         from config import DEFAULT_OLLAMA_PROMPT
-        self._ollama_prompt_textbox.configure(state="normal")
         self._ollama_prompt_textbox.delete("0.0", "end")
         self._ollama_prompt_textbox.insert("0.0", DEFAULT_OLLAMA_PROMPT)
-        self._ollama_prompt_textbox.configure(state="disabled")
         show_toast(self, "已恢復預設 Prompt", "info")
 
     def _show_msg(self, title: str, message: str, icon: str = "info"):

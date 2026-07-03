@@ -293,10 +293,11 @@ class Repository:
             return 0
         cutoff = f"-{days} days"
         # Find old processed posts that have no actionable children
+        # Use reviewed_at if available, otherwise fall back to detected_at
         rows = self.db.execute(
             """SELECT id FROM detected_posts
                WHERE status IN ('replied', 'rejected', 'skipped', 'failed')
-               AND detected_at < datetime('now', 'localtime', ?)
+               AND COALESCE(reviewed_at, detected_at) < datetime('now', 'localtime', ?)
                AND id NOT IN (
                    SELECT DISTINCT parent_post_id FROM detected_posts
                    WHERE parent_post_id IS NOT NULL
