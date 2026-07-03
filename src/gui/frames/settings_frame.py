@@ -178,7 +178,7 @@ class SettingsFrame(ctk.CTkFrame):
         row += 1
 
         # ── Ollama AI Judge ──
-        row = self._add_section_title(scroll, "Ollama AI 判斷（即將推出）", row, muted=True)
+        row = self._add_section_title(scroll, "Ollama AI 判斷", row)
 
         ctk.CTkLabel(
             scroll,
@@ -191,7 +191,7 @@ class SettingsFrame(ctk.CTkFrame):
         ollama_toggle_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         ollama_toggle_frame.grid(row=row, column=0, sticky="ew", padx=T.PAD_MD, pady=T.PAD_XS)
         ctk.CTkLabel(ollama_toggle_frame, text="停用",
-                     text_color=T.TEXT_TERTIARY).pack(side="left")
+                     text_color=T.TEXT_SECONDARY).pack(side="left")
         self._ollama_switch_var = ctk.StringVar(value="0")
         self._ollama_switch = ctk.CTkSwitch(
             ollama_toggle_frame, text="啟用（全自動模式下由 AI 判斷是否回覆）",
@@ -199,16 +199,13 @@ class SettingsFrame(ctk.CTkFrame):
             onvalue="1", offvalue="0",
             fg_color=T.NAVY_600, progress_color=T.GOLD_500,
             button_color=T.TEXT_PRIMARY, button_hover_color=T.GOLD_400,
-            text_color=T.TEXT_TERTIARY,
+            text_color=T.TEXT_SECONDARY,
         )
         self._ollama_switch.pack(side="left", padx=T.PAD_MD)
-        self._disable_frame_children(ollama_toggle_frame)
         row += 1
 
         row = self._add_entry(scroll, "ollama_url", "Ollama URL", row, default="http://localhost:11434")
         row = self._add_entry(scroll, "ollama_model", "模型名稱", row, default="llama3.2")
-        self._entries["ollama_url"].configure(state="disabled")
-        self._entries["ollama_model"].configure(state="disabled")
 
         # Ollama system prompt (textbox) — editable even when Ollama is disabled
         prompt_label_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -243,7 +240,6 @@ class SettingsFrame(ctk.CTkFrame):
             test_btn_frame, text="", text_color=T.TEXT_TERTIARY,
         )
         self._ollama_status_label.pack(side="left", padx=T.PAD_MD)
-        self._disable_frame_children(test_btn_frame)
         row += 1
 
         # ── Safety Parameters ──
@@ -414,7 +410,7 @@ class SettingsFrame(ctk.CTkFrame):
         browser_visible = repo.get_setting("browser_visible", "0")
         self._visible_switch_var.set(browser_visible)
 
-        self._ollama_switch_var.set("0")
+        self._ollama_switch_var.set(repo.get_setting("ollama_enabled", "0"))
         for key in ("ollama_url", "ollama_model"):
             default = "http://localhost:11434" if key == "ollama_url" else "llama3.2"
             self._set_entry(key, repo.get_setting(key, default))
@@ -530,7 +526,7 @@ class SettingsFrame(ctk.CTkFrame):
         mode = "full_auto" if self._mode_switch_var.get() == "1" else "semi_auto"
         repo.set_setting("reply_mode", mode)
 
-        repo.set_setting("ollama_enabled", "0")
+        repo.set_setting("ollama_enabled", self._ollama_switch_var.get())
         for key in ("ollama_url", "ollama_model"):
             default = "http://localhost:11434" if key == "ollama_url" else "llama3.2"
             val = self._get_entry(key) or default
