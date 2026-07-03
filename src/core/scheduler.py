@@ -1,7 +1,9 @@
 """APScheduler-based polling orchestrator for patrol + reply."""
 
 import logging
+import random
 import threading
+import time
 from typing import Optional, Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -271,14 +273,45 @@ class PatrolScheduler:
 
             self._emit_log("info", f"[{platform}] 搜尋到 {len(raw_posts)} 篇貼文，新增相關 {processed} 篇")
 
-            if new_count > 0:
+            # Phase 2: Comment scanning
+            comment_count = 0
+            if (self._safe_int("comment_scan_enabled", 1) == 1
+                    and hasattr(adapter, 'fetch_post_comments')):
+                scan_limit = self._safe_int("comment_scan_limit_per_patrol", 3)
+                scan_age = self._safe_int("comment_scan_age_hours", 24)
+                posts_to_scan = self.repo.get_posts_needing_comment_scan(
+                    platform, max_age_hours=scan_age, limit=scan_limit,
+                )
+                if posts_to_scan:
+                    self._emit_log("info", f"[{platform}] 掃描 {len(posts_to_scan)} 篇貼文的留言...")
+                for post in posts_to_scan:
+                    try:
+                        raw_comments = adapter.fetch_post_comments(post.post_url)
+                        if raw_comments:
+                            cnt = self.reply_engine.process_fetched_comments(
+                                platform, raw_comments, parent_post_id=post.id,
+                            )
+                            comment_count += cnt
+                            self._emit_log("info", f"[{platform}] 貼文 #{post.id}: {len(raw_comments)} 則留言，新增相關 {cnt} 則")
+                        self.repo.mark_comments_scanned(post.id)
+                    except Exception as e:
+                        self._emit_log("warning", f"[{platform}] 掃描貼文 #{post.id} 留言失敗: {e}")
+                        logger.exception("Comment scan failed for post %d", post.id)
+                    time.sleep(random.uniform(2.0, 5.0))
+
+            total_new = new_count + comment_count
+
+            if total_new > 0:
                 if self._session_id:
                     self.repo.update_patrol_session_counts(
-                        self._session_id, detected_delta=new_count,
+                        self._session_id, detected_delta=total_new,
                     )
                 if self.on_new_posts:
-                    self.on_new_posts(new_count)
-                self._emit_log("success", f"[{platform}] 本次海巡偵測到 {new_count} 篇新貼文")
+                    self.on_new_posts(total_new)
+                msg = f"[{platform}] 本次海巡偵測到 {new_count} 篇新貼文"
+                if comment_count > 0:
+                    msg += f"、{comment_count} 則新留言"
+                self._emit_log("success", msg)
             else:
                 self._emit_log("info", f"[{platform}] 本次海巡無新貼文")
 

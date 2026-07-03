@@ -35,6 +35,9 @@ class DetectedPost:
     status: str = "pending"  # pending|approved|rejected|replied|failed|skipped
     detected_at: Optional[str] = None
     reviewed_at: Optional[str] = None
+    parent_post_id: Optional[int] = None  # DB id of parent post (for comments)
+    post_type: str = "post"  # post|comment
+    comments_scanned_at: Optional[str] = None
 
 
 @dataclass

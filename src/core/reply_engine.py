@@ -125,6 +125,70 @@ class ReplyEngine:
             )
         return new_count
 
+    def process_fetched_comments(self, platform: str, raw_comments: list[dict],
+                                  parent_post_id: int) -> int:
+        """Process raw comments from a post. Returns number of new relevant comments."""
+        new_count = 0
+        templates = self.template_manager.get_all()
+
+        for raw in raw_comments:
+            post_id = raw.get("platform_post_id", "")
+            content = raw.get("post_content", "")
+
+            if not post_id or not content:
+                continue
+            if self.repo.is_post_already_detected(platform, post_id):
+                continue
+
+            result = self.matcher.match(content)
+            if not result.is_relevant:
+                continue
+
+            recommended = self.matcher.recommend_templates(result, templates, platform, top_n=1)
+            rec_id = recommended[0].id if recommended else None
+
+            mode = self.repo.get_setting("reply_mode", "semi_auto")
+            if result.has_negative:
+                status = "pending"
+            elif mode == "full_auto":
+                status = self._ollama_evaluate(content, result)
+            else:
+                status = "pending"
+
+            post = DetectedPost(
+                platform=platform,
+                platform_post_id=post_id,
+                post_url=raw.get("post_url", ""),
+                author_username=raw.get("author_username", ""),
+                post_content=content,
+                matched_keywords=json.dumps(result.matched_keywords, ensure_ascii=False),
+                relevance_score=result.score,
+                recommended_template_id=rec_id,
+                status=status,
+                parent_post_id=parent_post_id,
+                post_type="comment",
+            )
+
+            inserted_id = self.repo.insert_detected_post(post)
+            if inserted_id:
+                new_count += 1
+                kw_str = ", ".join(result.matched_keywords[:3])
+                logger.info("Detected comment on %s: score=%.1f, keywords=%s, status=%s",
+                            platform, result.score, result.matched_keywords, status)
+                self._emit("info", f"[{platform}] 偵測到留言 (相關性 {result.score:.1f}, 關鍵字: {kw_str})")
+
+                if status == "approved":
+                    if rec_id:
+                        self._queue_auto_reply(inserted_id, rec_id, platform, recommended[0].content)
+                    else:
+                        self.repo.update_post_status(inserted_id, "pending")
+                        self._emit("warning", f"[{platform}] 全自動模式：無可用文案，轉為人工審核")
+
+        if raw_comments:
+            logger.info("process_fetched_comments(%s): total=%d, new=%d, parent=%d",
+                        platform, len(raw_comments), new_count, parent_post_id)
+        return new_count
+
     def _ollama_evaluate(self, content: str, result) -> str:
         """Use Ollama to evaluate if post should be replied to in full_auto mode."""
         ollama_enabled = self.repo.get_setting("ollama_enabled", "0") == "1"

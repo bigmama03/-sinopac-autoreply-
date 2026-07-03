@@ -171,6 +171,56 @@ class ThreadsBrowserAdapter(PlatformAdapter):
             logger.exception("Threads fetch_posts failed")
             return []
 
+    def fetch_post_comments(self, post_url: str) -> list[dict]:
+        """Navigate to a post page and extract its comments/replies."""
+        try:
+            with self._bm.locked_page(PLATFORM) as page:
+                if not self._safe_goto(page, post_url, timeout=15000):
+                    logger.error("Cannot navigate to post for comment extraction: %s", post_url[:100])
+                    return []
+                self._sleep(1.0, 2.0)
+                self._dismiss_login_modal(page)
+                if self._is_login_page(page):
+                    logger.error("Session expired during comment fetch (url=%s)", page.url[:120])
+                    return []
+
+                self._wait_for_posts(page, timeout=10000)
+
+                # Scroll to load more comments
+                scroll_count = 4
+                if self._repo is not None:
+                    try:
+                        v = int(self._repo.get_setting("comment_scroll_count", "4"))
+                        if v >= 1:
+                            scroll_count = v
+                    except (ValueError, TypeError):
+                        pass
+                for _ in range(scroll_count):
+                    try:
+                        page.evaluate("window.scrollBy(0, 900)")
+                    except Exception:
+                        break
+                    time.sleep(random.uniform(0.8, 1.5))
+
+                self._capture_screenshot(page)
+
+                # Extract all post containers on the page
+                all_posts = self._extract_posts(page)
+
+                # Filter: skip the parent post itself (its URL matches post_url)
+                norm_parent = self._normalize_url(post_url) or post_url
+                comments = []
+                for post in all_posts:
+                    pid = post.get("platform_post_id", "")
+                    if pid and pid != norm_parent:
+                        comments.append(post)
+
+                logger.info("Extracted %d comments from post %s", len(comments), post_url[:80])
+                return comments
+        except Exception:
+            logger.exception("fetch_post_comments failed for %s", post_url[:80])
+            return []
+
     def reply_to_post(self, post_id: str, message: str) -> tuple[bool, Optional[str], Optional[str]]:
         try:
             with self._bm.locked_page(PLATFORM) as page:

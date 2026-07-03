@@ -51,6 +51,10 @@ DEFAULT_SETTINGS = {
     "polling_interval_facebook_sec": 120, # 2 minutes
     "polling_interval_instagram_sec": 300,
     "search_scroll_count": 6,
+    "comment_scan_enabled": "1",
+    "comment_scan_limit_per_patrol": 3,
+    "comment_scan_age_hours": 24,
+    "comment_scroll_count": 4,
     "sending_paused": "0",
     "relevance_threshold": 3.0,
     "threads_enabled": False,

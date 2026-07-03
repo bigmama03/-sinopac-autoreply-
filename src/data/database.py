@@ -4,7 +4,7 @@ import sqlite3
 import threading
 from typing import Optional
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 -- Schema version tracking
@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS detected_posts (
                             CHECK(status IN ('pending', 'approved', 'rejected', 'replied', 'failed', 'skipped')),
     detected_at             TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     reviewed_at             TEXT,
+    parent_post_id          INTEGER REFERENCES detected_posts(id),
+    post_type               TEXT NOT NULL DEFAULT 'post' CHECK(post_type IN ('post', 'comment')),
+    comments_scanned_at     TEXT,
     UNIQUE(platform, platform_post_id)
 );
 
@@ -138,6 +141,8 @@ CREATE INDEX IF NOT EXISTS idx_reply_log_sent_at ON reply_log(sent_at);
 CREATE INDEX IF NOT EXISTS idx_reply_log_status ON reply_log(status);
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_templates_category ON templates(category);
+CREATE INDEX IF NOT EXISTS idx_detected_posts_parent ON detected_posts(parent_post_id);
+CREATE INDEX IF NOT EXISTS idx_detected_posts_type ON detected_posts(post_type);
 """
 
 _MIGRATIONS = [
@@ -202,6 +207,13 @@ _MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_reply_log_sent_at ON reply_log(sent_at);",
         "CREATE INDEX IF NOT EXISTS idx_reply_log_status ON reply_log(status);",
         "CREATE INDEX IF NOT EXISTS idx_reply_log_deleted_at ON reply_log(deleted_at);",
+    ]),
+    (5, "Add comment crawling support to detected_posts", [
+        "ALTER TABLE detected_posts ADD COLUMN parent_post_id INTEGER REFERENCES detected_posts(id);",
+        "ALTER TABLE detected_posts ADD COLUMN post_type TEXT NOT NULL DEFAULT 'post';",
+        "ALTER TABLE detected_posts ADD COLUMN comments_scanned_at TEXT;",
+        "CREATE INDEX IF NOT EXISTS idx_detected_posts_parent ON detected_posts(parent_post_id);",
+        "CREATE INDEX IF NOT EXISTS idx_detected_posts_type ON detected_posts(post_type);",
     ]),
 ]
 

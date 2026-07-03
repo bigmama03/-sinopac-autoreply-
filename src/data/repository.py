@@ -1,8 +1,11 @@
 """Data access layer for all database operations."""
 
 import json
+import logging
 from typing import Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from src.data.database import Database
 from src.data.models import (
@@ -79,16 +82,20 @@ class Repository:
             cursor = self.db.execute(
                 """INSERT INTO detected_posts
                    (platform, platform_post_id, post_url, author_username, post_content,
-                    matched_keywords, relevance_score, recommended_template_id, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    matched_keywords, relevance_score, recommended_template_id, status,
+                    parent_post_id, post_type)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (p.platform, p.platform_post_id, p.post_url, p.author_username,
                  p.post_content, p.matched_keywords, p.relevance_score,
-                 p.recommended_template_id, p.status),
+                 p.recommended_template_id, p.status,
+                 p.parent_post_id, p.post_type),
             )
             self.db.commit()
             return cursor.lastrowid
-        except sqlite3.IntegrityError:
-            # Duplicate post (UNIQUE constraint on platform + platform_post_id)
+        except sqlite3.IntegrityError as e:
+            if "UNIQUE" in str(e).upper():
+                return None  # Duplicate post
+            logger.error("insert_detected_post integrity error: %s", e)
             return None
 
     def get_pending_posts(self) -> list[DetectedPost]:
@@ -129,18 +136,27 @@ class Repository:
         return cursor.rowcount
 
     def delete_detected_posts(self, post_ids: list[int]) -> int:
-        """Delete detected posts and their associated reply logs. Returns count deleted."""
+        """Delete detected posts, their child comments, and associated reply logs. Returns count deleted."""
         if not post_ids:
             return 0
         placeholders = ",".join("?" for _ in post_ids)
         try:
-            self.db.execute(
-                f"DELETE FROM reply_log WHERE detected_post_id IN ({placeholders})",
+            # Find child comment IDs under the posts being deleted
+            child_rows = self.db.execute(
+                f"SELECT id FROM detected_posts WHERE parent_post_id IN ({placeholders})",
                 tuple(post_ids),
+            ).fetchall()
+            child_ids = [r[0] for r in child_rows]
+            all_ids = list(post_ids) + child_ids
+
+            all_placeholders = ",".join("?" for _ in all_ids)
+            self.db.execute(
+                f"DELETE FROM reply_log WHERE detected_post_id IN ({all_placeholders})",
+                tuple(all_ids),
             )
             cursor = self.db.execute(
-                f"DELETE FROM detected_posts WHERE id IN ({placeholders})",
-                tuple(post_ids),
+                f"DELETE FROM detected_posts WHERE id IN ({all_placeholders})",
+                tuple(all_ids),
             )
             self.db.commit()
             return cursor.rowcount
@@ -160,6 +176,7 @@ class Repository:
         status: str | None = None,
         platform: str | None = None,
         search: str | None = None,
+        post_type: str | None = None,
         limit: int = 200,
     ) -> tuple[list[DetectedPost], int]:
         """Query posts with optional filters. Returns (posts, total_unfiltered_count)."""
@@ -174,6 +191,9 @@ class Repository:
         if platform:
             clauses.append("platform = ?")
             params.append(platform)
+        if post_type:
+            clauses.append("post_type = ?")
+            params.append(post_type)
         if search:
             escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             clauses.append("(post_content LIKE ? ESCAPE '\\' OR author_username LIKE ? ESCAPE '\\')")
@@ -208,7 +228,58 @@ class Repository:
             recommended_template_id=row["recommended_template_id"],
             status=row["status"], detected_at=row["detected_at"],
             reviewed_at=row["reviewed_at"],
+            parent_post_id=row["parent_post_id"] if "parent_post_id" in row.keys() else None,
+            post_type=row["post_type"] if "post_type" in row.keys() else "post",
+            comments_scanned_at=row["comments_scanned_at"] if "comments_scanned_at" in row.keys() else None,
         )
+
+    # ── Comment scanning ────────────────────────────────────
+
+    def mark_comments_scanned(self, post_id: int):
+        """Mark a post as having its comments scanned."""
+        self.db.execute(
+            "UPDATE detected_posts SET comments_scanned_at = datetime('now', 'localtime') WHERE id = ?",
+            (post_id,),
+        )
+        self.db.commit()
+
+    def get_posts_needing_comment_scan(
+        self, platform: str, max_age_hours: int = 24, limit: int = 5,
+    ) -> list[DetectedPost]:
+        """Get top-level posts needing comment scan (never scanned or stale)."""
+        rows = self.db.execute(
+            """SELECT * FROM detected_posts
+               WHERE platform = ? AND post_type = 'post' AND post_url IS NOT NULL AND post_url != ''
+               AND status != 'rejected'
+               AND (comments_scanned_at IS NULL
+                    OR comments_scanned_at < datetime('now', 'localtime', ?))
+               ORDER BY comments_scanned_at IS NOT NULL ASC,
+                        comments_scanned_at ASC,
+                        detected_at DESC
+               LIMIT ?""",
+            (platform, f"-{max_age_hours} hours", limit),
+        ).fetchall()
+        return [self._row_to_post(r) for r in rows]
+
+    def get_comment_count_for_post(self, post_id: int) -> int:
+        """Count detected comments under a given post."""
+        row = self.db.execute(
+            "SELECT COUNT(*) FROM detected_posts WHERE parent_post_id = ?",
+            (post_id,),
+        ).fetchone()
+        return row[0]
+
+    def get_comment_counts_batch(self, post_ids: list[int]) -> dict[int, int]:
+        """Count detected comments for multiple posts in one query."""
+        if not post_ids:
+            return {}
+        placeholders = ",".join("?" for _ in post_ids)
+        rows = self.db.execute(
+            f"SELECT parent_post_id, COUNT(*) FROM detected_posts "
+            f"WHERE parent_post_id IN ({placeholders}) GROUP BY parent_post_id",
+            post_ids,
+        ).fetchall()
+        return {row[0]: row[1] for row in rows}
 
     # ── Reply Log (immutable — INSERT only) ──────────────────
 

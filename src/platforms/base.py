@@ -32,6 +32,14 @@ class PlatformAdapter(ABC):
         """Check if we already replied to this post."""
         ...
 
+    def fetch_post_comments(self, post_url: str) -> list[dict]:
+        """Fetch comments on a specific post.
+        Returns list of dicts with keys:
+            platform_post_id, post_url, author_username, post_content
+        Default: empty list (not supported).
+        """
+        return []
+
     def check_reply_visible(self, reply_id: str) -> bool | None:
         """Check if a sent reply is still visible. Returns None if check is unsupported."""
         return None

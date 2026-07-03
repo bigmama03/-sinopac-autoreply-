@@ -76,11 +76,23 @@ class ReviewFrame(ctk.CTkFrame):
         self._status_filter.set("待處理")
         self._status_filter.pack(side="left", padx=(T.PAD_XS, T.PAD_MD))
 
+        ctk.CTkLabel(filter_inner, text="類型:", text_color=T.TEXT_SECONDARY,
+                     font=T.font_small()).pack(side="left")
+        self._type_filter = ctk.CTkOptionMenu(
+            filter_inner, values=["全部", "貼文", "留言"],
+            width=90, command=lambda _: self._apply_filter(),
+            fg_color=T.NAVY_700, button_color=T.NAVY_600,
+            button_hover_color=T.NAVY_500,
+            dropdown_fg_color=T.BG_ELEVATED,
+            text_color=T.TEXT_PRIMARY,
+        )
+        self._type_filter.pack(side="left", padx=(T.PAD_XS, T.PAD_MD))
+
         ctk.CTkLabel(filter_inner, text="搜尋:", text_color=T.TEXT_SECONDARY,
                      font=T.font_small()).pack(side="left")
         self._search_var = ctk.StringVar()
         self._search_entry = ctk.CTkEntry(
-            filter_inner, textvariable=self._search_var, width=180,
+            filter_inner, textvariable=self._search_var, width=150,
             placeholder_text="搜尋貼文內容或作者...",
             fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
             text_color=T.TEXT_PRIMARY,
@@ -213,6 +225,9 @@ class ReviewFrame(ctk.CTkFrame):
         "全部": None, "待處理": "pending", "已回覆": "replied",
         "已跳過": "skipped", "已審核": "approved", "已拒絕": "rejected", "失敗": "failed",
     }
+    _TYPE_MAP = {
+        "全部": None, "貼文": "post", "留言": "comment",
+    }
 
     # ── Refresh & filter ──
 
@@ -223,14 +238,19 @@ class ReviewFrame(ctk.CTkFrame):
     def _apply_filter(self):
         plat = self._PLATFORM_MAP.get(self._platform_filter.get())
         status = self._STATUS_MAP.get(self._status_filter.get())
+        post_type = self._TYPE_MAP.get(self._type_filter.get())
         search = self._search_var.get().strip()
 
         # Single DB query with filters pushed down to SQL
         posts, total = self.app.repo.get_posts_filtered(
-            status=status, platform=plat, search=search or None, limit=200,
+            status=status, platform=plat, search=search or None,
+            post_type=post_type, limit=200,
         )
 
         self._filtered_posts = posts
+        # Batch load comment counts to avoid N+1 queries
+        post_ids = [p.id for p in posts if getattr(p, "post_type", "post") == "post"]
+        self._comment_counts = self.app.repo.get_comment_counts_batch(post_ids)
         self._displayed = 0
         self._check_vars.clear()
         self._select_all_var.set("0")
@@ -260,6 +280,7 @@ class ReviewFrame(ctk.CTkFrame):
             has_filters = (
                 self._platform_filter.get() != "全部"
                 or self._status_filter.get() != "全部"
+                or self._type_filter.get() != "全部"
                 or self._search_var.get().strip()
             )
 
@@ -353,6 +374,19 @@ class ReviewFrame(ctk.CTkFrame):
         color = T.PLATFORM_COLORS.get(post.platform, T.TEXT_SECONDARY)
         ctk.CTkLabel(hdr, text=post.platform.upper(),
                      font=T.font_badge(), text_color=color).pack(side="left")
+
+        if getattr(post, "post_type", "post") == "comment":
+            ctk.CTkLabel(
+                hdr, text="[留言]", font=T.font_badge(),
+                text_color=T.TEAL_500,
+            ).pack(side="left", padx=(T.PAD_XS, 0))
+        elif getattr(post, "post_type", "post") == "post":
+            comment_count = self._comment_counts.get(post.id, 0)
+            if comment_count > 0:
+                ctk.CTkLabel(
+                    hdr, text=f"💬 {comment_count}", font=T.font_badge(),
+                    text_color=T.TEXT_TERTIARY,
+                ).pack(side="left", padx=(T.PAD_XS, 0))
 
         if post.author_username:
             ctk.CTkLabel(hdr, text=f"@{post.author_username}",
