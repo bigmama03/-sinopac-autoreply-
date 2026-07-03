@@ -141,8 +141,8 @@ CREATE INDEX IF NOT EXISTS idx_reply_log_sent_at ON reply_log(sent_at);
 CREATE INDEX IF NOT EXISTS idx_reply_log_status ON reply_log(status);
 CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
 CREATE INDEX IF NOT EXISTS idx_templates_category ON templates(category);
-CREATE INDEX IF NOT EXISTS idx_detected_posts_parent ON detected_posts(parent_post_id);
-CREATE INDEX IF NOT EXISTS idx_detected_posts_type ON detected_posts(post_type);
+-- idx_detected_posts_parent and idx_detected_posts_type are created by migration v5
+-- to avoid errors on existing databases where the columns don't exist yet.
 """
 
 _MIGRATIONS = [
