@@ -71,6 +71,8 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                 if self._is_login_page(page):
                     return False, "未登入 Threads"
                 username = self._get_own_username(page)
+                if username and self._repo is not None:
+                    self._repo.set_setting("threads_own_username", username)
                 try:
                     self._bm.save_session(PLATFORM)
                 except Exception:
@@ -94,6 +96,11 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                 if self._is_login_page(page):
                     logger.error("Threads session invalid (redirected to login: %s)", page.url[:120])
                     return []
+
+                # Detect own username to filter out self-posts
+                own_username = self._get_own_username(page)
+                if own_username and self._repo is not None:
+                    self._repo.set_setting("threads_own_username", own_username)
 
                 deduped: dict[str, dict] = {}
                 for keyword in keywords:
@@ -163,8 +170,12 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                     logger.info("Extracted %d posts for keyword=%s", len(extracted), kw)
                     for post in extracted:
                         pid = post.get("platform_post_id")
-                        if pid and pid not in deduped:
-                            deduped[pid] = post
+                        if not pid or pid in deduped:
+                            continue
+                        author = post.get("author_username", "")
+                        if own_username and author and author.lower() == own_username.lower():
+                            continue
+                        deduped[pid] = post
                     time.sleep(random.uniform(1.0, 3.0))
                 return list(deduped.values())
         except Exception:
@@ -204,16 +215,25 @@ class ThreadsBrowserAdapter(PlatformAdapter):
 
                 self._capture_screenshot(page)
 
+                # Use stored own username (detected on home page during fetch_posts)
+                own_username = ""
+                if self._repo is not None:
+                    own_username = self._repo.get_setting("threads_own_username", "")
+
                 # Extract all post containers on the page
                 all_posts = self._extract_posts(page)
 
-                # Filter: skip the parent post itself (its URL matches post_url)
+                # Filter: skip the parent post and own account's comments
                 norm_parent = self._normalize_url(post_url) or post_url
                 comments = []
                 for post in all_posts:
                     pid = post.get("platform_post_id", "")
-                    if pid and pid != norm_parent:
-                        comments.append(post)
+                    if not pid or pid == norm_parent:
+                        continue
+                    author = post.get("author_username", "")
+                    if own_username and author and author.lower() == own_username.lower():
+                        continue
+                    comments.append(post)
 
                 logger.info("Extracted %d comments from post %s", len(comments), post_url[:80])
                 return comments

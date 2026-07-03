@@ -55,6 +55,7 @@ DEFAULT_SETTINGS = {
     "comment_scan_limit_per_patrol": 3,
     "comment_scan_age_hours": 24,
     "comment_scroll_count": 4,
+    "auto_cleanup_days": 30,
     "sending_paused": "0",
     "relevance_threshold": 3.0,
     "threads_enabled": False,

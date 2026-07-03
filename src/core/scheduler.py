@@ -104,6 +104,17 @@ class PatrolScheduler:
             id="shadowban_check", replace_existing=True,
         )
 
+        # Auto cleanup (every 6 hours)
+        self._scheduler.add_job(
+            self._auto_cleanup, IntervalTrigger(hours=6),
+            id="auto_cleanup", replace_existing=True,
+        )
+        # Run cleanup once at startup
+        self._scheduler.add_job(
+            self._auto_cleanup, DateTrigger(),
+            id="auto_cleanup_init",
+        )
+
         # Create session before starting scheduler so _session_id is set
         # when the immediate DateTrigger patrol jobs fire.
         platforms = list(self.reply_engine.adapters.keys())
@@ -370,3 +381,17 @@ class PatrolScheduler:
 
         except Exception as e:
             logger.exception("Shadowban check error: %s", e)
+
+    def _auto_cleanup(self):
+        """Delete old processed posts to keep the database lean."""
+        try:
+            days = self._safe_int("auto_cleanup_days", 30)
+            if days <= 0:
+                return
+            deleted = self.repo.cleanup_old_posts(days)
+            if deleted > 0:
+                self.repo.log_audit("AUTO_CLEANUP", {"days": days, "deleted": deleted})
+                self._emit_log("info", f"自動清理：已刪除 {deleted} 筆 {days} 天前的已處理貼文")
+                logger.info("Auto cleanup: deleted %d posts older than %d days", deleted, days)
+        except Exception as e:
+            logger.exception("Auto cleanup error: %s", e)

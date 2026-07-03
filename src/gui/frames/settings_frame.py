@@ -234,6 +234,7 @@ class SettingsFrame(ctk.CTkFrame):
         row = self._add_entry(scroll, "business_hours_start", "營業時間起始 (HH:MM)", row, default="09:00")
         row = self._add_entry(scroll, "business_hours_end", "營業時間結束 (HH:MM)", row, default="18:00")
         row = self._add_entry(scroll, "search_scroll_count", "搜尋滾動次數 (越多抓越多貼文)", row, default="6")
+        row = self._add_entry(scroll, "auto_cleanup_days", "自動清理天數 (0=停用)", row, default="30")
 
         # Save button
         ctk.CTkButton(
@@ -401,7 +402,7 @@ class SettingsFrame(ctk.CTkFrame):
         for key in ("daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
                      "reply_interval_min_sec", "reply_interval_max_sec",
                      "business_hours_start", "business_hours_end",
-                     "search_scroll_count"):
+                     "search_scroll_count", "auto_cleanup_days"):
             default = str(DEFAULT_SETTINGS.get(key, ""))
             val = repo.get_setting(key, default)
             if val:
@@ -460,7 +461,7 @@ class SettingsFrame(ctk.CTkFrame):
         numeric_keys = (
             "daily_limit_threads", "daily_limit_facebook", "daily_limit_instagram",
             "reply_interval_min_sec", "reply_interval_max_sec",
-            "search_scroll_count",
+            "search_scroll_count", "auto_cleanup_days",
         )
         numeric_labels = {
             "daily_limit_threads": "Threads 每日上限",
@@ -469,10 +470,19 @@ class SettingsFrame(ctk.CTkFrame):
             "reply_interval_min_sec": "回覆間隔最小",
             "reply_interval_max_sec": "回覆間隔最大",
             "search_scroll_count": "搜尋滾動次數",
+            "auto_cleanup_days": "自動清理天數",
         }
+        # auto_cleanup_days allows 0 (disabled), others must be > 0
+        allow_zero = {"auto_cleanup_days"}
         for key in numeric_keys:
             val = self._get_entry(key)
-            if val and (not val.isdigit() or int(val) <= 0):
+            if not val:
+                continue
+            if key in allow_zero:
+                if not val.isdigit():
+                    show_toast(self, f"「{numeric_labels.get(key, key)}」必須為非負整數", "error", duration_ms=3000)
+                    return
+            elif not val.isdigit() or int(val) <= 0:
                 show_toast(self, f"「{numeric_labels.get(key, key)}」必須為正整數", "error", duration_ms=3000)
                 return
 

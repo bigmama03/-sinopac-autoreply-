@@ -281,6 +281,34 @@ class Repository:
         ).fetchall()
         return {row[0]: row[1] for row in rows}
 
+    # ── Auto cleanup ───────────────────────────────────────
+
+    def cleanup_old_posts(self, days: int) -> int:
+        """Delete processed posts older than N days. Returns count deleted.
+
+        Skips parent posts that still have pending/approved child comments.
+        Also cleans up old standalone comments in terminal states.
+        """
+        if days <= 0:
+            return 0
+        cutoff = f"-{days} days"
+        # Find old processed posts that have no actionable children
+        rows = self.db.execute(
+            """SELECT id FROM detected_posts
+               WHERE status IN ('replied', 'rejected', 'skipped', 'failed')
+               AND detected_at < datetime('now', 'localtime', ?)
+               AND id NOT IN (
+                   SELECT DISTINCT parent_post_id FROM detected_posts
+                   WHERE parent_post_id IS NOT NULL
+                   AND status IN ('pending', 'approved')
+               )""",
+            (cutoff,),
+        ).fetchall()
+        post_ids = [r[0] for r in rows]
+        if not post_ids:
+            return 0
+        return self.delete_detected_posts(post_ids)
+
     # ── Reply Log (immutable — INSERT only) ──────────────────
 
     def insert_reply_log(self, r: ReplyLog) -> int:
