@@ -7,17 +7,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """你是永豐金證券的社群行銷助理。你的任務是判斷一則社群貼文是否適合由永豐金證券的官方帳號回覆推廣內容。
-
-判斷標準：
-1. 貼文是否在討論投資、開戶、股票、手續費等相關話題
-2. 貼文語氣是否正面或中性（負面抱怨、客訴、爭議性話題不適合回覆）
-3. 貼文是否有商業推廣的空間（純個人情緒抒發、政治討論不適合）
-4. 貼文作者是否可能是潛在客戶（正在尋找投資管道、比較券商）
-
-請只回覆 JSON 格式：
-{"should_reply": true/false, "reason": "簡短原因"}"""
-
 _TAG_TIMEOUT = 5
 _GENERATE_TIMEOUT = (5, 30)
 
@@ -25,9 +14,15 @@ _GENERATE_TIMEOUT = (5, 30)
 class OllamaJudge:
     """Uses a local Ollama LLM to judge whether a post should be replied to."""
 
-    def __init__(self, url: str = "http://localhost:11434", model: str = "llama3.2"):
+    def __init__(self, url: str = "http://localhost:11434", model: str = "llama3.2",
+                 system_prompt: str = ""):
         self.url = url.rstrip("/")
         self.model = model
+        if system_prompt.strip():
+            self.system_prompt = system_prompt.strip()
+        else:
+            from config import DEFAULT_OLLAMA_PROMPT
+            self.system_prompt = DEFAULT_OLLAMA_PROMPT
         self.session = requests.Session()
 
     def check_connection(self) -> tuple[bool, str]:
@@ -74,7 +69,7 @@ class OllamaJudge:
                 json={
                     "model": self.model,
                     "prompt": user_prompt,
-                    "system": _SYSTEM_PROMPT,
+                    "system": self.system_prompt,
                     "stream": False,
                     "options": {
                         "temperature": 0.1,

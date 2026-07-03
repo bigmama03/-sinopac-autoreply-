@@ -77,6 +77,18 @@ DEFAULT_KEYWORDS = [
     {"keyword": "投資", "category": "一般", "weight": 1.0},
 ]
 
+# Default Ollama system prompt
+DEFAULT_OLLAMA_PROMPT = """你是永豐金證券的社群行銷助理。你的任務是判斷一則社群貼文是否適合由永豐金證券的官方帳號回覆推廣內容。
+
+判斷標準：
+1. 貼文是否在討論投資、開戶、股票、手續費等相關話題
+2. 貼文語氣是否正面或中性（負面抱怨、客訴、爭議性話題不適合回覆）
+3. 貼文是否有商業推廣的空間（純個人情緒抒發、政治討論不適合）
+4. 貼文作者是否可能是潛在客戶（正在尋找投資管道、比較券商）
+
+請只回覆 JSON 格式：
+{"should_reply": true/false, "reason": "簡短原因"}"""
+
 # Negative keywords (force human review)
 NEGATIVE_KEYWORDS = ["詐騙", "爛", "虧錢", "客訴", "垃圾", "黑心"]
 

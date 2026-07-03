@@ -307,7 +307,8 @@ class App(ctk.CTk):
         """Build an Ollama judge instance from current repository settings."""
         ollama_url = self.repo.get_setting("ollama_url", "http://localhost:11434")
         ollama_model = self.repo.get_setting("ollama_model", "llama3.2")
-        return OllamaJudge(url=ollama_url, model=ollama_model)
+        ollama_prompt = self.repo.get_setting("ollama_system_prompt", "")
+        return OllamaJudge(url=ollama_url, model=ollama_model, system_prompt=ollama_prompt)
 
     def reload_ollama_judge(self):
         """Refresh the injected Ollama judge after settings changes."""
