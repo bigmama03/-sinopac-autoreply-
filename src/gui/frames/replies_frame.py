@@ -464,8 +464,7 @@ class RepliesFrame(ctk.CTkFrame):
                 return
 
         cancelled = self.app.repo.cancel_all_pending_replies(platform=platform)
-        # Also clear in-memory scheduled send times
-        self.app.reply_engine._scheduled_send_time.clear()
+        self.app.reply_engine.cancel_all_scheduled()
         self.app.repo.log_audit("BULK_CANCEL_PENDING", {
             "count": cancelled, "platform": platform or "all",
         })
@@ -480,9 +479,16 @@ class RepliesFrame(ctk.CTkFrame):
             show_toast(self, "請先篩選已送出、已取消或失敗的紀錄", "warning")
             return
 
-        count = self.app.repo.count_reply_logs_filtered(
-            status=status, platform=platform, show_deleted=False,
-        )
+        # When no status filter, only count terminal statuses (matching bulk_soft_delete_replies)
+        if status is None:
+            count = sum(
+                self.app.repo.count_reply_logs_filtered(status=s, platform=platform, show_deleted=False)
+                for s in ("sent", "cancelled", "failed")
+            )
+        else:
+            count = self.app.repo.count_reply_logs_filtered(
+                status=status, platform=platform, show_deleted=False,
+            )
         if count == 0:
             show_toast(self, "沒有可刪除的紀錄", "info")
             return

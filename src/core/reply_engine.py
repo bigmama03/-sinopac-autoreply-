@@ -238,6 +238,11 @@ class ReplyEngine:
         with self._schedule_lock:
             self._scheduled_send_time.pop(reply_id, None)
 
+    def cancel_all_scheduled(self):
+        """Clear all in-memory scheduled send times."""
+        with self._schedule_lock:
+            self._scheduled_send_time.clear()
+
     def send_pending_replies(self) -> int:
         """Send all pending replies. Returns number sent."""
         sent_count = 0

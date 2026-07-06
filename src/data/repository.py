@@ -715,17 +715,25 @@ class Repository:
         ids = [r["id"] for r in rows]
         post_ids = list({r["detected_post_id"] for r in rows})
         placeholders = ",".join("?" for _ in ids)
-        self.db.execute(
-            f"UPDATE reply_log SET status = 'cancelled' WHERE id IN ({placeholders})",
-            ids,
-        )
-        post_placeholders = ",".join("?" for _ in post_ids)
-        self.db.execute(
-            f"UPDATE detected_posts SET status = 'pending' WHERE id IN ({post_placeholders})",
-            post_ids,
-        )
-        self.db.commit()
-        return len(ids)
+        try:
+            # Guard: only cancel replies still in pending/retrying (avoid race with sending)
+            cursor = self.db.execute(
+                f"UPDATE reply_log SET status = 'cancelled' "
+                f"WHERE id IN ({placeholders}) AND status IN ('pending', 'retrying')",
+                ids,
+            )
+            # Guard: only reset posts currently in approved status
+            post_placeholders = ",".join("?" for _ in post_ids)
+            self.db.execute(
+                f"UPDATE detected_posts SET status = 'pending' "
+                f"WHERE id IN ({post_placeholders}) AND status = 'approved'",
+                post_ids,
+            )
+            self.db.commit()
+            return cursor.rowcount
+        except Exception:
+            self.db.conn.rollback()
+            raise
 
     def bulk_soft_delete_replies(self, status: Optional[str] = None,
                                   platform: Optional[str] = None) -> int:
