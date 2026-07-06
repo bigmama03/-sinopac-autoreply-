@@ -55,12 +55,11 @@ class BrowserManager:
         self._latest_screenshot: Optional[bytes] = None  # PIP preview buffer
 
     def set_headless(self, headless: bool) -> None:
-        """Change headless mode. Closes existing browser; next operation uses new mode."""
+        """Change headless mode. Takes effect on next patrol start."""
         if self._headless == headless:
             return
         self._headless = headless
-        self.close()
-        logger.info("Browser headless mode changed to %s", headless)
+        logger.info("Browser headless mode changed to %s (takes effect on next patrol start)", headless)
 
     def _session_path(self, platform: str) -> Path:
         return Path(BROWSER_DATA_DIR) / f"{platform}_session.json"

@@ -279,7 +279,11 @@ class SettingsFrame(ctk.CTkFrame):
         visible = self._visible_switch_var.get() == "1"
         self.app.repo.set_setting("browser_visible", "1" if visible else "0")
         self.app.browser_manager.set_headless(not visible)
-        show_toast(self, "海巡瀏覽器將以可見模式執行" if visible else "海巡瀏覽器已切回背景模式", "info")
+        if visible:
+            msg = "海巡瀏覽器將以可見模式執行（下次啟動海巡生效）"
+        else:
+            msg = "海巡瀏覽器已切回背景模式（下次啟動海巡生效）"
+        show_toast(self, msg, "info")
 
     def _browser_login(self, platform: str):
         urls = {
