@@ -151,6 +151,15 @@ class PatrolScheduler:
             # update session counts during scheduler.shutdown(wait=True).
 
         scheduler.shutdown(wait=wait)
+
+        # Close browser after scheduler threads have finished so Playwright
+        # objects are properly torn down on the same thread that created them.
+        if self._browser_manager:
+            try:
+                self._browser_manager.close()
+            except Exception:
+                logger.warning("Browser cleanup on patrol stop failed", exc_info=True)
+
         self.repo.set_setting("sending_paused", "0")
 
         # Snapshot and clear _session_id after shutdown so no in-flight

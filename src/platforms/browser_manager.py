@@ -89,28 +89,41 @@ class BrowserManager:
                     self._headless, current_tid)
 
     def _teardown_browser(self) -> None:
-        """Close browser and Playwright without acquiring the lock (caller holds it)."""
-        for platform in list(self._contexts):
+        """Close browser and Playwright without acquiring the lock (caller holds it).
+
+        If called from a different thread than the one that created the browser,
+        Playwright objects cannot be interacted with (greenlet-bound). In that case
+        we just drop references and let GC/process exit clean up.
+        """
+        same_thread = (self._browser_tid is None
+                       or self._browser_tid == threading.get_ident())
+
+        if same_thread:
+            for platform in list(self._contexts):
+                try:
+                    self._contexts[platform].storage_state(
+                        path=str(self._session_path(platform)))
+                except Exception:
+                    pass
+                try:
+                    self._contexts[platform].close()
+                except Exception:
+                    pass
             try:
-                self._contexts[platform].storage_state(
-                    path=str(self._session_path(platform)))
+                if self._browser:
+                    self._browser.close()
             except Exception:
                 pass
             try:
-                self._contexts[platform].close()
+                if self._pw:
+                    self._pw.stop()
             except Exception:
                 pass
+        else:
+            logger.info("Skipping graceful browser teardown (created on thread %s, "
+                        "current thread %s)", self._browser_tid, threading.get_ident())
+
         self._contexts.clear()
-        try:
-            if self._browser:
-                self._browser.close()
-        except Exception:
-            pass
-        try:
-            if self._pw:
-                self._pw.stop()
-        except Exception:
-            pass
         self._browser = None
         self._pw = None
         self._browser_tid = None
