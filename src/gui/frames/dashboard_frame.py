@@ -126,6 +126,7 @@ class DashboardFrame(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.app = app
         self._destroyed = False
+        self._deferred_refresh_id = None
 
         # Outer layout: scrollable canvas + scrollbar
         self.grid_columnconfigure(0, weight=1)
@@ -365,8 +366,6 @@ class DashboardFrame(ctk.CTkFrame):
         canvas_widget.configure(highlightthickness=0)
         canvas_widget.grid(row=0, column=0, sticky="nsew")
         self._style_axis(self._ax)
-        self._chart_canvas.draw()
-        self._update_chart()
 
         # ── Row 6-7: Patrol history ──
         T.section_title(self._inner, "海巡紀錄", row=6)
@@ -893,5 +892,16 @@ class DashboardFrame(ctk.CTkFrame):
         self._mode_label.configure(text=mode_text, text_color=mode_color)
 
         self._update_patrol_ui()
+
+        # Defer heavy rendering (chart + sessions) so the UI stays responsive
+        if hasattr(self, "_deferred_refresh_id") and self._deferred_refresh_id is not None:
+            self.after_cancel(self._deferred_refresh_id)
+        self._deferred_refresh_id = self.after_idle(self._refresh_heavy)
+
+    def _refresh_heavy(self):
+        """Render chart and session list — deferred to keep UI snappy."""
+        self._deferred_refresh_id = None
+        if self._destroyed:
+            return
         self._update_chart()
         self._update_sessions()

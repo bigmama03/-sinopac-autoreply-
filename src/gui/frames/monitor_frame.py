@@ -310,6 +310,8 @@ class MonitorFrame(ctk.CTkFrame):
     }
 
     def append_patrol_log(self, level: str, message: str):
+        if not self.winfo_exists():
+            return
         ts = datetime.now().strftime("%H:%M:%S")
         prefix = self._LOG_LEVEL_PREFIX.get(level, "INFO")
         line = f"[{ts}] [{prefix}] {message}"
@@ -357,38 +359,49 @@ class MonitorFrame(ctk.CTkFrame):
             self._preview_after_id = None
 
     def _poll_preview(self):
-        try:
-            data = self.app.browser_manager.get_screenshot()
-            if data:
-                lw = self._preview_label.winfo_width()
-                lh = self._preview_label.winfo_height()
-                if lw > 100 and lh > 100:
-                    max_w = lw - 16
-                    max_h = lh - 16
-                else:
-                    max_w = 640
-                    max_h = 480
-
-                img = Image.open(io.BytesIO(data))
-                img.thumbnail((max_w, max_h), Image.LANCZOS)
-                ctk_img = ctk.CTkImage(
-                    light_image=img, dark_image=img,
-                    size=(img.width, img.height),
-                )
-                self._preview_label.configure(image=ctk_img, text="")
-                self._preview_image = ctk_img
-            elif self.app.scheduler.is_running:
-                self._preview_label.configure(text="等待瀏覽器截圖...")
-        except Exception:
-            pass
-
-        if self.app.scheduler.is_running:
-            self._preview_after_id = self.after(1500, self._poll_preview)
-        else:
+        if not self.app.scheduler.is_running:
             self._preview_after_id = None
             self._preview_label.configure(text="海巡未啟動")
             self._preview_image = None
             self.app.browser_manager.clear_screenshot()
+            return
+
+        # Capture label size on main thread, then do I/O + decode in background
+        lw = self._preview_label.winfo_width()
+        lh = self._preview_label.winfo_height()
+        max_w = (lw - 16) if lw > 100 else 640
+        max_h = (lh - 16) if lh > 100 else 480
+
+        def _decode():
+            try:
+                data = self.app.browser_manager.get_screenshot()
+                if not data:
+                    self.app.run_in_gui(lambda: self._preview_set_text("等待瀏覽器截圖..."))
+                    return
+                img = Image.open(io.BytesIO(data))
+                img.thumbnail((max_w, max_h), Image.LANCZOS)
+                # CTkImage must be created on main thread
+                self.app.run_in_gui(lambda i=img: self._preview_set_image(i))
+            except Exception:
+                pass
+
+        threading.Thread(target=_decode, daemon=True).start()
+        self._preview_after_id = self.after(1500, self._poll_preview)
+
+    def _preview_set_image(self, img):
+        if not self.winfo_exists():
+            return
+        ctk_img = ctk.CTkImage(
+            light_image=img, dark_image=img,
+            size=(img.width, img.height),
+        )
+        self._preview_label.configure(image=ctk_img, text="")
+        self._preview_image = ctk_img
+
+    def _preview_set_text(self, text: str):
+        if not self.winfo_exists():
+            return
+        self._preview_label.configure(text=text)
 
     def destroy(self):
         self._stop_preview_polling()

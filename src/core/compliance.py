@@ -20,18 +20,10 @@ class ComplianceGate:
         """Check all compliance rules. Returns (allowed, reason)."""
 
         # Rule 1: Duplicate check — never reply to the same post twice
-        if self.repo.is_post_already_detected(platform, platform_post_id):
-            existing = self.repo.db.execute(
-                """SELECT dp.id, rl.status FROM detected_posts dp
-                   LEFT JOIN reply_log rl ON rl.detected_post_id = dp.id
-                   WHERE dp.platform = ? AND dp.platform_post_id = ?
-                   AND rl.status = 'sent'""",
-                (platform, platform_post_id),
-            ).fetchone()
-            if existing:
-                return False, "已回覆過此貼文"
+        if self.repo.has_sent_reply_for_post(platform, platform_post_id):
+            return False, "已回覆過此貼文"
 
-        # Rule 2: Daily limit check
+        # Rule 2: Daily limit check (adjusted by warmup ratio)
         daily_limit_key = f"daily_limit_{platform}"
         limit_str = self.repo.get_setting(daily_limit_key, "40")
         try:
@@ -39,9 +31,14 @@ class ComplianceGate:
         except ValueError:
             daily_limit = 40
 
+        warmup_ratio = self.check_warmup(platform)
+        effective_limit = max(1, int(daily_limit * warmup_ratio))
+
         today_count = self.repo.count_replies_today(platform)
-        if today_count >= daily_limit:
-            return False, f"已達每日上限 ({today_count}/{daily_limit})"
+        if today_count >= effective_limit:
+            if warmup_ratio < 1.0:
+                return False, f"暖機期間已達上限 ({today_count}/{effective_limit}, 原上限 {daily_limit})"
+            return False, f"已達每日上限 ({today_count}/{effective_limit})"
 
         # Rule 3: Business hours check
         start_str = self.repo.get_setting("business_hours_start", "09:00")
@@ -67,11 +64,7 @@ class ComplianceGate:
         if not template.is_active:
             return False, "文案已停用"
 
-        existing = self.repo.db.execute(
-            "SELECT 1 FROM reply_log WHERE detected_post_id = ? AND status = 'sent'",
-            (post_id,)
-        ).fetchone()
-        if existing:
+        if self.repo.has_sent_reply_for_detected_post(post_id):
             return False, "此貼文已回覆過"
 
         return True, None
@@ -80,26 +73,27 @@ class ComplianceGate:
         """Return the warmup ratio (0.0-1.0) for reply limiting during warmup period.
         Returns 1.0 if warmup is complete.
         """
-        warmup_days = int(self.repo.get_setting("warmup_days", "3"))
-        warmup_ratio = float(self.repo.get_setting("warmup_ratio", "0.3"))
+        try:
+            warmup_days = int(self.repo.get_setting("warmup_days", "3"))
+        except (ValueError, TypeError):
+            warmup_days = 3
+        try:
+            warmup_ratio = float(self.repo.get_setting("warmup_ratio", "0.3"))
+        except (ValueError, TypeError):
+            warmup_ratio = 0.3
 
-        row = self.repo.db.execute(
-            """SELECT MIN(sent_at) FROM reply_log
-               WHERE platform = ? AND status = 'sent'""",
-            (platform,),
-        ).fetchone()
-
-        if not row or not row[0]:
+        first_sent = self.repo.get_first_sent_at(platform)
+        if not first_sent:
             return warmup_ratio
 
         try:
-            first_reply = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+            first_reply = datetime.fromisoformat(first_sent)
             days_active = (datetime.now() - first_reply).days
             if days_active < warmup_days:
                 progress = days_active / warmup_days
                 return warmup_ratio + (1.0 - warmup_ratio) * progress
         except (ValueError, TypeError):
-            pass
+            return warmup_ratio
 
         return 1.0
 

@@ -89,17 +89,21 @@ class LogsFrame(ctk.CTkFrame):
             ).grid(row=0, column=i, sticky="w", padx=T.PAD_SM, pady=T.PAD_XS)
 
         self._log_widgets: list[list] = []
+        self._all_logs = []
+        self._page_size = 50
+        self._displayed = 0
 
     def refresh(self):
         for row_widgets in self._log_widgets:
             for w in row_widgets:
                 w.destroy()
         self._log_widgets.clear()
+        self._displayed = 0
 
         action_filter = self._filter_var.get().strip() or None
-        logs = self.app.repo.get_audit_logs(limit=500, action_filter=action_filter)
+        self._all_logs = self.app.repo.get_audit_logs(limit=500, action_filter=action_filter)
 
-        if not logs:
+        if not self._all_logs:
             empty = ctk.CTkLabel(
                 self._scroll_frame,
                 text="尚無稽核日誌\n\n系統操作（啟動海巡、核准回覆、刪除等）都會自動記錄在這裡",
@@ -110,42 +114,70 @@ class LogsFrame(ctk.CTkFrame):
             self._log_widgets.append([empty])
             return
 
-        for i, log in enumerate(logs):
+        self._load_more()
+
+    def _load_more(self):
+        """Render the next page of log entries."""
+        end = min(self._displayed + self._page_size, len(self._all_logs))
+        for i in range(self._displayed, end):
+            log = self._all_logs[i]
             row_num = i + 1
-            widgets = []
+            self._render_log_row(log, row_num)
+        self._displayed = end
 
-            ts_label = ctk.CTkLabel(
-                self._scroll_frame, text=(log.timestamp or "")[:19],
-                font=T.font_small(), text_color=T.TEXT_TERTIARY,
+        # Remove old "load more" button if any
+        if hasattr(self, "_load_more_btn") and self._load_more_btn is not None:
+            self._load_more_btn.destroy()
+            self._load_more_btn = None
+
+        if self._displayed < len(self._all_logs):
+            remaining = len(self._all_logs) - self._displayed
+            self._load_more_btn = ctk.CTkButton(
+                self._scroll_frame,
+                text=f"載入更多 ({remaining} 筆)",
+                width=200, height=32,
+                **T.BTN_GHOST_ACCENT,
+                command=self._load_more,
             )
-            ts_label.grid(row=row_num, column=0, sticky="nw", padx=T.PAD_SM, pady=1)
-            widgets.append(ts_label)
+            self._load_more_btn.grid(row=self._displayed + 1, column=0, columnspan=3, pady=T.PAD_MD)
+        else:
+            self._load_more_btn = None
 
-            action_label = ctk.CTkLabel(
-                self._scroll_frame, text=log.action,
-                font=T.font_badge(), text_color=T.GOLD_500,
-            )
-            action_label.grid(row=row_num, column=1, sticky="nw", padx=T.PAD_SM, pady=1)
-            widgets.append(action_label)
+    def _render_log_row(self, log, row_num: int):
+        widgets = []
 
-            raw_details = log.details or ""
-            details_preview = self._format_details(raw_details, truncate=True)
-            details_full = self._format_details(raw_details, truncate=False)
-            is_long = len(raw_details) > 80
+        ts_label = ctk.CTkLabel(
+            self._scroll_frame, text=(log.timestamp or "")[:19],
+            font=T.font_small(), text_color=T.TEXT_TERTIARY,
+        )
+        ts_label.grid(row=row_num, column=0, sticky="nw", padx=T.PAD_SM, pady=1)
+        widgets.append(ts_label)
 
-            details_label = ctk.CTkLabel(
-                self._scroll_frame, text=details_preview,
-                font=T.font_caption(), text_color=T.TEXT_TERTIARY,
-                wraplength=500, justify="left",
-                cursor="hand2" if is_long else "",
-            )
-            details_label.grid(row=row_num, column=2, sticky="nw", padx=T.PAD_SM, pady=1)
-            if is_long:
-                details_label._expanded = False
-                details_label.bind("<Button-1>", lambda e, lbl=details_label, short=details_preview, full=details_full: self._toggle_detail(lbl, short, full))
-            widgets.append(details_label)
+        action_label = ctk.CTkLabel(
+            self._scroll_frame, text=log.action,
+            font=T.font_badge(), text_color=T.GOLD_500,
+        )
+        action_label.grid(row=row_num, column=1, sticky="nw", padx=T.PAD_SM, pady=1)
+        widgets.append(action_label)
 
-            self._log_widgets.append(widgets)
+        raw_details = log.details or ""
+        details_preview = self._format_details(raw_details, truncate=True)
+        details_full = self._format_details(raw_details, truncate=False)
+        is_long = len(raw_details) > 80
+
+        details_label = ctk.CTkLabel(
+            self._scroll_frame, text=details_preview,
+            font=T.font_caption(), text_color=T.TEXT_TERTIARY,
+            wraplength=500, justify="left",
+            cursor="hand2" if is_long else "",
+        )
+        details_label.grid(row=row_num, column=2, sticky="nw", padx=T.PAD_SM, pady=1)
+        if is_long:
+            details_label._expanded = False
+            details_label.bind("<Button-1>", lambda e, lbl=details_label, short=details_preview, full=details_full: self._toggle_detail(lbl, short, full))
+        widgets.append(details_label)
+
+        self._log_widgets.append(widgets)
 
     def _clear_filter(self):
         self._filter_var.set("")

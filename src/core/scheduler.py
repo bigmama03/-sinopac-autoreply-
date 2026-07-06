@@ -59,78 +59,78 @@ class PatrolScheduler:
                 logger.warning("No platforms selected")
                 return
 
-        # Register platform adapters on the injected reply engine.
-        # Build into a temp dict first; only replace on success.
-        old_adapters = dict(self.reply_engine.adapters)
-        self.reply_engine.adapters.clear()
-        try:
-            self._register_adapters(platforms)
-        except Exception:
-            # Rollback on unexpected failure
-            self.reply_engine.adapters.update(old_adapters)
-            raise
-        self.active_platforms = list(self.reply_engine.adapters.keys())
-
-        if not self.reply_engine.adapters:
-            logger.warning("No platform adapters configured")
-            return
-
-        self._scheduler = BackgroundScheduler(daemon=True)
-
-        # Patrol jobs — recurring + immediate first run
-        for plat, default_sec in [("threads", 300), ("facebook", 120), ("instagram", 300)]:
-            if plat not in self.reply_engine.adapters:
-                continue
-            interval = self._safe_int(f"polling_interval_{plat}_sec", default_sec)
-            self._scheduler.add_job(
-                self._patrol, IntervalTrigger(seconds=interval),
-                args=[plat], id=f"patrol_{plat}", replace_existing=True,
-            )
-            # Run first patrol immediately (within 2 seconds)
-            self._scheduler.add_job(
-                self._patrol, DateTrigger(),
-                args=[plat], id=f"patrol_{plat}_init",
-            )
-
-        # Reply sender (every 30 seconds)
-        self._scheduler.add_job(
-            self._send_replies, IntervalTrigger(seconds=30),
-            id="send_replies", replace_existing=True,
-        )
-
-        # Shadowban check (every 30 minutes)
-        self._scheduler.add_job(
-            self._check_shadowban, IntervalTrigger(minutes=30),
-            id="shadowban_check", replace_existing=True,
-        )
-
-        # Auto cleanup (every 6 hours)
-        self._scheduler.add_job(
-            self._auto_cleanup, IntervalTrigger(hours=6),
-            id="auto_cleanup", replace_existing=True,
-        )
-        # Run cleanup once at startup
-        self._scheduler.add_job(
-            self._auto_cleanup, DateTrigger(),
-            id="auto_cleanup_init",
-        )
-
-        # Create session before starting scheduler so _session_id is set
-        # when the immediate DateTrigger patrol jobs fire.
-        platforms = list(self.reply_engine.adapters.keys())
-        self._session_id = self.repo.start_patrol_session(platforms)
-
-        self._scheduler.start()
-        self._running = True
-
-        # Restore sending paused state from DB
-        if self.repo.get_setting("sending_paused", "0") == "1":
+            # Register platform adapters on the injected reply engine.
+            # Build into a temp dict first; only replace on success.
+            old_adapters = dict(self.reply_engine.adapters)
+            self.reply_engine.adapters.clear()
             try:
-                self._scheduler.pause_job("send_replies")
-                self._sending_paused = True
-                logger.info("Sending paused (restored from DB)")
-            except Exception as e:
-                logger.warning("Failed to restore sending paused state: %s", e)
+                self._register_adapters(platforms)
+            except Exception:
+                # Rollback on unexpected failure
+                self.reply_engine.adapters.update(old_adapters)
+                raise
+            self.active_platforms = list(self.reply_engine.adapters.keys())
+
+            if not self.reply_engine.adapters:
+                logger.warning("No platform adapters configured")
+                return
+
+            self._scheduler = BackgroundScheduler(daemon=True)
+
+            # Patrol jobs — recurring + immediate first run
+            for plat, default_sec in [("threads", 300), ("facebook", 120), ("instagram", 300)]:
+                if plat not in self.reply_engine.adapters:
+                    continue
+                interval = self._safe_int(f"polling_interval_{plat}_sec", default_sec)
+                self._scheduler.add_job(
+                    self._patrol, IntervalTrigger(seconds=interval),
+                    args=[plat], id=f"patrol_{plat}", replace_existing=True,
+                )
+                # Run first patrol immediately (within 2 seconds)
+                self._scheduler.add_job(
+                    self._patrol, DateTrigger(),
+                    args=[plat], id=f"patrol_{plat}_init",
+                )
+
+            # Reply sender (every 30 seconds)
+            self._scheduler.add_job(
+                self._send_replies, IntervalTrigger(seconds=30),
+                id="send_replies", replace_existing=True,
+            )
+
+            # Shadowban check (every 30 minutes)
+            self._scheduler.add_job(
+                self._check_shadowban, IntervalTrigger(minutes=30),
+                id="shadowban_check", replace_existing=True,
+            )
+
+            # Auto cleanup (every 6 hours)
+            self._scheduler.add_job(
+                self._auto_cleanup, IntervalTrigger(hours=6),
+                id="auto_cleanup", replace_existing=True,
+            )
+            # Run cleanup once at startup
+            self._scheduler.add_job(
+                self._auto_cleanup, DateTrigger(),
+                id="auto_cleanup_init",
+            )
+
+            # Create session before starting scheduler so _session_id is set
+            # when the immediate DateTrigger patrol jobs fire.
+            platforms = list(self.reply_engine.adapters.keys())
+            self._session_id = self.repo.start_patrol_session(platforms)
+
+            self._scheduler.start()
+            self._running = True
+
+            # Restore sending paused state from DB
+            if self.repo.get_setting("sending_paused", "0") == "1":
+                try:
+                    self._scheduler.pause_job("send_replies")
+                    self._sending_paused = True
+                    logger.info("Sending paused (restored from DB)")
+                except Exception as e:
+                    logger.warning("Failed to restore sending paused state: %s", e)
 
         self._emit_log("success", f"海巡已啟動，平台: {', '.join(p.capitalize() for p in platforms)}")
         self.repo.log_audit("PATROL_STARTED", {

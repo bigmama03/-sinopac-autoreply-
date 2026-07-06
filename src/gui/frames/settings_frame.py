@@ -305,12 +305,14 @@ class SettingsFrame(ctk.CTkFrame):
                 success = bm.login_interactive(platform, url)
 
                 def _finish():
+                    if not self.winfo_exists():
+                        return
                     if success:
                         self._update_browser_status(platform)
                         show_toast(self, f"{platform.capitalize()} 登入成功", "success")
                         self.app.repo.update_platform_config(platform, is_enabled=1)
                     else:
-                        if status_label:
+                        if status_label and status_label.winfo_exists():
                             status_label.configure(
                                 text="登入失敗或逾時", text_color=T.ERROR,
                             )
@@ -319,7 +321,9 @@ class SettingsFrame(ctk.CTkFrame):
                 self.app.run_in_gui(_finish)
             except Exception as e:
                 def _error(err=str(e)):
-                    if status_label:
+                    if not self.winfo_exists():
+                        return
+                    if status_label and status_label.winfo_exists():
                         status_label.configure(
                             text=f"錯誤: {err[:40]}", text_color=T.ERROR,
                         )
@@ -360,17 +364,18 @@ class SettingsFrame(ctk.CTkFrame):
                 success, message = adapter.check_connection()
 
                 def _finish():
-                    if test_label:
+                    if test_label and test_label.winfo_exists():
                         color = T.TEAL_500 if success else T.ERROR
                         test_label.configure(text=message, text_color=color)
 
                 self.app.run_in_gui(_finish)
             except Exception as e:
-                self.app.run_in_gui(
-                    lambda err=str(e): test_label.configure(
-                        text=f"錯誤: {err[:40]}", text_color=T.ERROR,
-                    ) if test_label else None
-                )
+                def _error(err=str(e)):
+                    if test_label and test_label.winfo_exists():
+                        test_label.configure(
+                            text=f"錯誤: {err[:40]}", text_color=T.ERROR,
+                        )
+                self.app.run_in_gui(_error)
 
         threading.Thread(target=_worker, daemon=True).start()
 

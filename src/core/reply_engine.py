@@ -55,6 +55,11 @@ class ReplyEngine:
         """Process raw posts from a platform adapter. Returns number of new relevant posts."""
         new_count = 0
         templates = self.template_manager.get_all()
+        mode = self.repo.get_setting("reply_mode", "semi_auto")
+
+        # Batch duplicate check: single query instead of N queries
+        all_post_ids = [r.get("platform_post_id", "") for r in raw_posts if r.get("platform_post_id")]
+        existing_ids = self.repo.get_existing_post_ids(platform, all_post_ids) if all_post_ids else set()
 
         skipped_empty = 0
         skipped_dup = 0
@@ -67,7 +72,7 @@ class ReplyEngine:
                 skipped_empty += 1
                 continue
 
-            if self.repo.is_post_already_detected(platform, post_id):
+            if post_id in existing_ids:
                 skipped_dup += 1
                 continue
 
@@ -80,8 +85,6 @@ class ReplyEngine:
 
             recommended = self.matcher.recommend_templates(result, templates, platform, top_n=1)
             rec_id = recommended[0].id if recommended else None
-
-            mode = self.repo.get_setting("reply_mode", "semi_auto")
             if result.has_negative:
                 status = "pending"
             elif mode == "full_auto":
@@ -130,6 +133,11 @@ class ReplyEngine:
         """Process raw comments from a post. Returns number of new relevant comments."""
         new_count = 0
         templates = self.template_manager.get_all()
+        mode = self.repo.get_setting("reply_mode", "semi_auto")
+
+        # Batch duplicate check
+        all_comment_ids = [r.get("platform_post_id", "") for r in raw_comments if r.get("platform_post_id")]
+        existing_ids = self.repo.get_existing_post_ids(platform, all_comment_ids) if all_comment_ids else set()
 
         for raw in raw_comments:
             post_id = raw.get("platform_post_id", "")
@@ -137,7 +145,7 @@ class ReplyEngine:
 
             if not post_id or not content:
                 continue
-            if self.repo.is_post_already_detected(platform, post_id):
+            if post_id in existing_ids:
                 continue
 
             result = self.matcher.match(content)
@@ -146,8 +154,6 @@ class ReplyEngine:
 
             recommended = self.matcher.recommend_templates(result, templates, platform, top_n=1)
             rec_id = recommended[0].id if recommended else None
-
-            mode = self.repo.get_setting("reply_mode", "semi_auto")
             if result.has_negative:
                 status = "pending"
             elif mode == "full_auto":
@@ -237,18 +243,9 @@ class ReplyEngine:
         sent_count = 0
 
         # Recover stale 'sending' rows from previous crash/restart
-        self.repo.db.execute(
-            "UPDATE reply_log SET status = 'retrying' WHERE status = 'sending'"
-        )
-        self.repo.db.commit()
+        self.repo.recover_stale_sending()
 
-        rows = self.repo.db.execute(
-            """SELECT rl.*, dp.platform_post_id
-               FROM reply_log rl
-               JOIN detected_posts dp ON rl.detected_post_id = dp.id
-               WHERE rl.status IN ('pending', 'retrying')
-               ORDER BY rl.created_at ASC"""
-        ).fetchall()
+        rows = self.repo.get_pending_reply_rows()
 
         with self._schedule_lock:
             # Prune stale scheduled entries for replies no longer pending
@@ -313,12 +310,7 @@ class ReplyEngine:
                 logger.warning("check_already_replied failed: %s", e)
 
             # Atomic claim: set status to 'sending' so cancel cannot race
-            claimed = self.repo.db.execute(
-                "UPDATE reply_log SET status = 'sending' WHERE id = ? AND status IN ('pending', 'retrying')",
-                (reply_id,),
-            ).rowcount
-            self.repo.db.commit()
-            if not claimed:
+            if not self.repo.claim_reply_for_sending(reply_id):
                 logger.info("Reply %d: skipped (status changed)", reply_id)
                 continue
 
@@ -337,7 +329,10 @@ class ReplyEngine:
                     "post_id": platform_post_id,
                 })
                 logger.info("Reply sent on %s: %s", platform, platform_reply_id)
-                self._emit("success", f"[{platform}] 回覆 #{reply_id} 發送成功")
+                if platform_reply_id:
+                    self._emit("success", f"[{platform}] 回覆 #{reply_id} 發送成功")
+                else:
+                    self._emit("warning", f"[{platform}] 回覆 #{reply_id} 已送出但無法確認是否成功")
             else:
                 retry_count = row["retry_count"]
                 if retry_count < 3:

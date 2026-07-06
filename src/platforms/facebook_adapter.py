@@ -64,6 +64,7 @@ class FacebookAdapter(PlatformAdapter):
             )
 
             if resp.status_code != 200:
+                self._check_token_expiry(resp)
                 logger.error("Facebook feed fetch failed: %s", resp.text[:200])
                 return []
 
@@ -105,6 +106,7 @@ class FacebookAdapter(PlatformAdapter):
             )
 
             if resp.status_code != 200:
+                self._check_token_expiry(resp)
                 logger.error("Facebook target %s fetch failed: %s", target_id, resp.text[:200])
                 return []
 
@@ -142,7 +144,11 @@ class FacebookAdapter(PlatformAdapter):
                 logger.info("Facebook reply sent: %s → %s", post_id, reply_id)
                 return True, reply_id, None
             else:
-                error = resp.json().get("error", {}).get("message", resp.text[:200])
+                self._check_token_expiry(resp)
+                try:
+                    error = resp.json().get("error", {}).get("message", resp.text[:200])
+                except (ValueError, KeyError):
+                    error = resp.text[:200]
                 return False, None, f"回覆失敗: {error}"
 
         except requests.RequestException as e:
@@ -185,6 +191,12 @@ class FacebookAdapter(PlatformAdapter):
             return False, f"刪除失敗: {error}"
         except requests.RequestException as e:
             return False, f"網路錯誤: {e}"
+
+    def _check_token_expiry(self, resp: requests.Response):
+        """Log a warning if the API returns 401/403 (likely token expired)."""
+        if resp.status_code in (401, 403):
+            logger.warning("Facebook API returned %d — access token may be expired or revoked. "
+                           "Response: %s", resp.status_code, resp.text[:200])
 
     def check_already_replied(self, post_id: str) -> bool:
         """Check if our page already replied to this post/comment."""

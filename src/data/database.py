@@ -2,6 +2,7 @@
 
 import sqlite3
 import threading
+import weakref
 from typing import Optional
 
 SCHEMA_VERSION = 5
@@ -224,16 +225,21 @@ class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._local = threading.local()
+        self._all_conns: weakref.WeakSet[sqlite3.Connection] = weakref.WeakSet()
+        self._conn_lock = threading.Lock()
 
     @property
     def conn(self) -> sqlite3.Connection:
         """Get a thread-local database connection."""
         if not hasattr(self._local, "conn") or self._local.conn is None:
-            self._local.conn = sqlite3.connect(self.db_path)
-            self._local.conn.row_factory = sqlite3.Row
-            self._local.conn.execute("PRAGMA journal_mode=WAL")
-            self._local.conn.execute("PRAGMA foreign_keys=ON")
-            self._local.conn.execute("PRAGMA busy_timeout=5000")
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA busy_timeout=5000")
+            self._local.conn = conn
+            with self._conn_lock:
+                self._all_conns.add(conn)
         return self._local.conn
 
     def initialize(self):
@@ -299,6 +305,14 @@ class Database:
         self.conn.commit()
 
     def close(self):
-        if hasattr(self._local, "conn") and self._local.conn:
-            self._local.conn.close()
+        """Close all thread-local connections (not just the calling thread's)."""
+        with self._conn_lock:
+            for conn in list(self._all_conns):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._all_conns.clear()
+        # Also clear the calling thread's reference
+        if hasattr(self._local, "conn"):
             self._local.conn = None

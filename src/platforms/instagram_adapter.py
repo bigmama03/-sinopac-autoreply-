@@ -75,6 +75,7 @@ class InstagramAdapter(PlatformAdapter):
                     self._hashtag_id_cache[hashtag] = hid
                     return hid
             else:
+                self._check_token_expiry(resp)
                 logger.error("IG hashtag search failed: %s", resp.text[:200])
 
         except requests.RequestException as e:
@@ -106,6 +107,7 @@ class InstagramAdapter(PlatformAdapter):
                 )
 
                 if resp.status_code != 200:
+                    self._check_token_expiry(resp)
                     logger.error("IG recent_media failed: %s", resp.text[:200])
                     continue
 
@@ -140,7 +142,11 @@ class InstagramAdapter(PlatformAdapter):
                 logger.info("Instagram comment sent: %s → %s", post_id, reply_id)
                 return True, reply_id, None
             else:
-                error = resp.json().get("error", {}).get("message", resp.text[:200])
+                self._check_token_expiry(resp)
+                try:
+                    error = resp.json().get("error", {}).get("message", resp.text[:200])
+                except (ValueError, KeyError):
+                    error = resp.text[:200]
                 return False, None, f"留言失敗: {error}"
 
         except requests.RequestException as e:
@@ -213,14 +219,27 @@ class InstagramAdapter(PlatformAdapter):
             return False
 
     def _get_own_username(self) -> str:
-        if not hasattr(self, "_username"):
-            try:
-                resp = self.session.get(
-                    f"{IG_API_BASE}/{self.ig_user_id}",
-                    params=self._params({"fields": "username"}),
-                    timeout=10,
-                )
-                self._username = resp.json().get("username", "") if resp.status_code == 200 else ""
-            except requests.RequestException:
-                self._username = ""
-        return self._username
+        """Get our account username (cached). Only caches non-empty results."""
+        if getattr(self, "_username", ""):
+            return self._username
+        try:
+            resp = self.session.get(
+                f"{IG_API_BASE}/{self.ig_user_id}",
+                params=self._params({"fields": "username"}),
+                timeout=10,
+            )
+            self._check_token_expiry(resp)
+            if resp.status_code == 200:
+                username = resp.json().get("username", "")
+                if username:
+                    self._username = username
+                    return username
+        except requests.RequestException:
+            pass
+        return ""
+
+    def _check_token_expiry(self, resp: requests.Response):
+        """Log a warning if the API returns 401/403 (likely token expired)."""
+        if resp.status_code in (401, 403):
+            logger.warning("Instagram API returned %d — access token may be expired or revoked. "
+                           "Response: %s", resp.status_code, resp.text[:200])

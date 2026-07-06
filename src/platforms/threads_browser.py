@@ -274,7 +274,11 @@ class ThreadsBrowserAdapter(PlatformAdapter):
                     self._bm.save_session(PLATFORM)
                 except Exception:
                     pass
-                return True, reply_id, None
+                if reply_id:
+                    return True, reply_id, None
+                logger.warning("Reply submitted but could not verify permalink — "
+                               "the reply may not have been posted successfully")
+                return True, None, "回覆已送出但無法確認是否成功發佈"
         except Exception:
             logger.exception("Threads reply_to_post failed")
             return False, None, "開啟 Threads 頁面失敗"

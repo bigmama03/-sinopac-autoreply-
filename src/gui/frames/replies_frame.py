@@ -417,6 +417,9 @@ class RepliesFrame(ctk.CTkFrame):
                         "platform": platform,
                         "platform_reply_id": platform_reply_id,
                     })
+                if not self.winfo_exists():
+                    return
+                if success:
                     show_toast(self, "回覆已從平台刪除", "success")
                     self.refresh()
                 else:

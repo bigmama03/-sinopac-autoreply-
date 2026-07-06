@@ -164,6 +164,23 @@ class Repository:
             self.db.conn.rollback()
             raise
 
+    def get_existing_post_ids(self, platform: str, post_ids: list[str]) -> set[str]:
+        """Batch check which platform_post_ids already exist. Returns the set of existing IDs."""
+        if not post_ids:
+            return set()
+        # Batch in chunks of 500 to stay within SQLite variable limits
+        existing = set()
+        for i in range(0, len(post_ids), 500):
+            chunk = post_ids[i:i + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = self.db.execute(
+                f"SELECT platform_post_id FROM detected_posts "
+                f"WHERE platform = ? AND platform_post_id IN ({placeholders})",
+                (platform, *chunk),
+            ).fetchall()
+            existing.update(r[0] for r in rows)
+        return existing
+
     def is_post_already_detected(self, platform: str, platform_post_id: str) -> bool:
         row = self.db.execute(
             "SELECT 1 FROM detected_posts WHERE platform = ? AND platform_post_id = ?",
@@ -591,6 +608,75 @@ class Repository:
             params.extend([like, like, like])
         row = self.db.execute(sql, params).fetchone()
         return row[0]
+
+    def recover_stale_sending(self):
+        """Reset replies stuck in 'sending' status (from crash/restart) back to 'retrying'."""
+        self.db.execute(
+            "UPDATE reply_log SET status = 'retrying' WHERE status = 'sending'"
+        )
+        self.db.commit()
+
+    def get_pending_reply_rows(self) -> list[dict]:
+        """Get pending/retrying replies joined with their post info for sending."""
+        rows = self.db.execute(
+            """SELECT rl.*, dp.platform_post_id
+               FROM reply_log rl
+               JOIN detected_posts dp ON rl.detected_post_id = dp.id
+               WHERE rl.status IN ('pending', 'retrying')
+               ORDER BY rl.created_at ASC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def claim_reply_for_sending(self, reply_id: int) -> bool:
+        """Atomically claim a reply by setting status to 'sending'. Returns True if claimed."""
+        cursor = self.db.execute(
+            "UPDATE reply_log SET status = 'sending' WHERE id = ? AND status IN ('pending', 'retrying')",
+            (reply_id,),
+        )
+        self.db.commit()
+        return cursor.rowcount > 0
+
+    def has_sent_reply_for_post(self, platform: str, platform_post_id: str) -> bool:
+        """Check if a 'sent' reply already exists for a given platform post."""
+        row = self.db.execute(
+            """SELECT 1 FROM detected_posts dp
+               JOIN reply_log rl ON rl.detected_post_id = dp.id
+               WHERE dp.platform = ? AND dp.platform_post_id = ?
+               AND rl.status = 'sent'""",
+            (platform, platform_post_id),
+        ).fetchone()
+        return row is not None
+
+    def has_sent_reply_for_detected_post(self, post_id: int) -> bool:
+        """Check if a 'sent' reply exists for a detected_post_id."""
+        row = self.db.execute(
+            "SELECT 1 FROM reply_log WHERE detected_post_id = ? AND status = 'sent'",
+            (post_id,),
+        ).fetchone()
+        return row is not None
+
+    def get_post_platform(self, post_id: int) -> Optional[str]:
+        """Get the platform string for a detected post."""
+        row = self.db.execute(
+            "SELECT platform FROM detected_posts WHERE id = ?", (post_id,)
+        ).fetchone()
+        return row["platform"] if row else None
+
+    def has_active_reply(self, post_id: int) -> bool:
+        """Check if a detected post has a pending/sending/retrying/sent reply."""
+        row = self.db.execute(
+            "SELECT 1 FROM reply_log WHERE detected_post_id = ? AND status IN ('pending', 'sending', 'retrying', 'sent')",
+            (post_id,),
+        ).fetchone()
+        return row is not None
+
+    def get_first_sent_at(self, platform: str) -> Optional[str]:
+        """Get the earliest sent_at timestamp for a platform. Returns ISO string or None."""
+        row = self.db.execute(
+            "SELECT MIN(sent_at) FROM reply_log WHERE platform = ? AND status = 'sent'",
+            (platform,),
+        ).fetchone()
+        return row[0] if row and row[0] else None
 
     def cancel_pending_reply(self, reply_id: int) -> Optional[int]:
         """Cancel a pending/retrying reply. Returns detected_post_id or None."""

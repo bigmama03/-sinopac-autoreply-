@@ -153,6 +153,9 @@ class BrowserManager:
         the lock until the block exits. This guarantees exclusive access to the
         shared page for the entire duration of a browser operation.
 
+        If the browser/context has crashed, it will be torn down and recreated
+        once before raising.
+
         Usage::
 
             with bm.locked_page("threads") as page:
@@ -160,6 +163,17 @@ class BrowserManager:
                 # ... all Playwright calls are serialized
         """
         self._lock.acquire()
+        try:
+            page = self._get_or_create_page(platform)
+            yield page
+        finally:
+            self._lock.release()
+
+    def _get_or_create_page(self, platform: str, _retry: bool = True) -> Page:
+        """Get a page for the platform, recovering from a crashed browser once.
+
+        Must be called with ``self._lock`` held.
+        """
         try:
             self._ensure_browser()
             if platform not in self._contexts:
@@ -169,9 +183,15 @@ class BrowserManager:
                 self._contexts[platform] = ctx
             ctx = self._contexts[platform]
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
-            yield page
-        finally:
-            self._lock.release()
+            # Quick liveness check — accessing a property on a dead context throws
+            _ = page.url
+            return page
+        except Exception:
+            if not _retry:
+                raise
+            logger.warning("Browser context appears crashed for %s — recreating", platform)
+            self._teardown_browser()
+            return self._get_or_create_page(platform, _retry=False)
 
     def save_session(self, platform: str) -> None:
         """Persist context storage state (cookies/localStorage) to disk."""
@@ -358,12 +378,8 @@ class BrowserManager:
         acquired = self._lock.acquire(timeout=timeout)
         if not acquired:
             logger.warning("BrowserManager.close() could not acquire lock "
-                           "(patrol thread likely active); marking browser invalid")
-            # Mark invalid so next operation recreates instead of reusing stale state
-            self._browser = None
-            self._pw = None
-            self._contexts.clear()
-            self._browser_tid = None
+                           "(patrol thread likely active); skipping teardown — "
+                           "daemon threads will be killed on process exit")
             return
         try:
             self._teardown_browser()

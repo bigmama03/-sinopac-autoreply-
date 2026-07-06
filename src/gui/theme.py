@@ -6,6 +6,7 @@ Every GUI module imports from this file instead of hardcoding values.
 Brand DNA: 專業金融 × 數位科技 × 高效率作業
 """
 
+import functools
 import customtkinter as ctk
 
 
@@ -132,30 +133,40 @@ CHART_FONTS = [
 
 
 # ─── Font Helpers ─────────────────────────────────────────────
+# Cached: CTkFont objects are immutable in practice, so reusing them is safe.
+@functools.lru_cache(maxsize=1)
 def font_title() -> ctk.CTkFont:
     return ctk.CTkFont(size=20, weight="bold")
 
+@functools.lru_cache(maxsize=1)
 def font_section() -> ctk.CTkFont:
     return ctk.CTkFont(size=15, weight="bold")
 
+@functools.lru_cache(maxsize=1)
 def font_card_title() -> ctk.CTkFont:
     return ctk.CTkFont(size=13, weight="bold")
 
+@functools.lru_cache(maxsize=1)
 def font_body() -> ctk.CTkFont:
     return ctk.CTkFont(size=12)
 
+@functools.lru_cache(maxsize=1)
 def font_small() -> ctk.CTkFont:
     return ctk.CTkFont(size=11)
 
+@functools.lru_cache(maxsize=1)
 def font_caption() -> ctk.CTkFont:
     return ctk.CTkFont(size=10)
 
+@functools.lru_cache(maxsize=1)
 def font_stat() -> ctk.CTkFont:
     return ctk.CTkFont(size=28, weight="bold")
 
+@functools.lru_cache(maxsize=1)
 def font_mono() -> ctk.CTkFont:
     return ctk.CTkFont(family="monospace", size=11)
 
+@functools.lru_cache(maxsize=1)
 def font_badge() -> ctk.CTkFont:
     return ctk.CTkFont(size=10, weight="bold")
 

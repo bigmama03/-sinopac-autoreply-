@@ -25,6 +25,7 @@ class KeywordsFrame(ctk.CTkFrame):
         self._keyword_widgets: list[ctk.CTkBaseClass] = []
         self._all_keywords = []
         self._category_values = ["開戶", "手續費", "投資", "一般"]
+        self._search_debounce_id = None
 
         title_row = T.page_header(self, "關鍵字管理")
         title_row.grid(row=0, column=0, sticky="ew", pady=(0, T.PAD_MD))
@@ -65,7 +66,7 @@ class KeywordsFrame(ctk.CTkFrame):
             text_color=T.TEXT_PRIMARY,
         )
         self._search_entry.pack(side="left", padx=(0, T.PAD_SM))
-        self._search_entry.bind("<KeyRelease>", lambda _event: self._apply_filter())
+        self._search_entry.bind("<KeyRelease>", lambda _event: self._debounced_filter())
 
         self._filter_category_var = ctk.StringVar(value="全部分類")
         self._filter_category_menu = ctk.CTkOptionMenu(
@@ -211,7 +212,14 @@ class KeywordsFrame(ctk.CTkFrame):
         if hasattr(self.app, "keyword_matcher"):
             self.app.keyword_matcher.keywords = keywords
 
+    def _debounced_filter(self):
+        """Schedule _apply_filter after 300ms, cancelling any pending call."""
+        if self._search_debounce_id is not None:
+            self.after_cancel(self._search_debounce_id)
+        self._search_debounce_id = self.after(300, self._apply_filter)
+
     def _apply_filter(self):
+        self._search_debounce_id = None
         search_text = self._search_entry.get().strip().lower()
         category = self._filter_category_var.get()
 

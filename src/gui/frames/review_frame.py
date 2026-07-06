@@ -557,7 +557,7 @@ class ReviewFrame(ctk.CTkFrame):
         self._highlight_selected()
 
     def _move_selection(self, delta: int):
-        if self._is_typing() or not self._card_data:
+        if not self.winfo_ismapped() or self._is_typing() or not self._card_data:
             return
         new_idx = max(0, min(self._selected_index + delta, len(self._card_data) - 1))
         self._selected_index = new_idx
@@ -571,19 +571,19 @@ class ReviewFrame(ctk.CTkFrame):
                 data["card"].configure(border_width=1, border_color=T.BORDER_SUBTLE)
 
     def _key_approve(self):
-        if self._is_typing() or not self._card_data:
+        if not self.winfo_ismapped() or self._is_typing() or not self._card_data:
             return
         if self._selected_index < len(self._card_data):
             self._card_data[self._selected_index]["approve_fn"]()
 
     def _key_reject(self):
-        if self._is_typing() or not self._card_data:
+        if not self.winfo_ismapped() or self._is_typing() or not self._card_data:
             return
         if self._selected_index < len(self._card_data):
             self._reject_post(self._card_data[self._selected_index]["post"].id)
 
     def _key_skip(self):
-        if self._is_typing() or not self._card_data:
+        if not self.winfo_ismapped() or self._is_typing() or not self._card_data:
             return
         if self._selected_index < len(self._card_data):
             self._skip_post(self._card_data[self._selected_index]["post"].id)
@@ -597,18 +597,12 @@ class ReviewFrame(ctk.CTkFrame):
                 self._show_error("找不到指定文案")
                 return
 
-            post_row = self.app.repo.db.execute(
-                "SELECT platform FROM detected_posts WHERE id = ?", (post_id,)
-            ).fetchone()
-            if not post_row:
+            platform = self.app.repo.get_post_platform(post_id)
+            if not platform:
                 self._show_error("找不到指定貼文")
                 return
 
-            existing = self.app.repo.db.execute(
-                "SELECT id FROM reply_log WHERE detected_post_id = ? AND status IN ('pending', 'sending', 'retrying', 'sent')",
-                (post_id,),
-            ).fetchone()
-            if existing:
+            if self.app.repo.has_active_reply(post_id):
                 self._show_error("此貼文已有排程或已送出的回覆")
                 return
 
@@ -618,7 +612,7 @@ class ReviewFrame(ctk.CTkFrame):
             reply = ReplyLog(
                 detected_post_id=post_id,
                 template_id=template_id,
-                platform=post_row["platform"],
+                platform=platform,
                 reply_content=content,
                 reply_mode="semi_auto",
                 status="pending",

@@ -69,6 +69,7 @@ class ThreadsAdapter(PlatformAdapter):
                 )
 
                 if resp.status_code != 200:
+                    self._check_token_expiry(resp)
                     logger.error("Threads search failed: %s %s", resp.status_code, resp.text[:200])
                     continue
 
@@ -104,7 +105,11 @@ class ThreadsAdapter(PlatformAdapter):
             )
 
             if create_resp.status_code != 200:
-                error = create_resp.json().get("error", {}).get("message", create_resp.text[:200])
+                self._check_token_expiry(create_resp)
+                try:
+                    error = create_resp.json().get("error", {}).get("message", create_resp.text[:200])
+                except (ValueError, KeyError):
+                    error = create_resp.text[:200]
                 return False, None, f"建立回覆失敗: {error}"
 
             container_id = create_resp.json().get("id")
@@ -119,7 +124,10 @@ class ThreadsAdapter(PlatformAdapter):
             )
 
             if publish_resp.status_code != 200:
-                error = publish_resp.json().get("error", {}).get("message", publish_resp.text[:200])
+                try:
+                    error = publish_resp.json().get("error", {}).get("message", publish_resp.text[:200])
+                except (ValueError, KeyError):
+                    error = publish_resp.text[:200]
                 return False, None, f"發佈回覆失敗: {error}"
 
             reply_id = publish_resp.json().get("id", "")
@@ -187,15 +195,27 @@ class ThreadsAdapter(PlatformAdapter):
             return False, f"網路錯誤: {e}"
 
     def _get_own_username(self) -> str:
-        """Get our account username (cached)."""
-        if not hasattr(self, "_username"):
-            try:
-                resp = self.session.get(
-                    f"{THREADS_API_BASE}/me",
-                    params={"fields": "username"},
-                    timeout=10,
-                )
-                self._username = resp.json().get("username", "") if resp.status_code == 200 else ""
-            except requests.RequestException:
-                self._username = ""
-        return self._username
+        """Get our account username (cached). Only caches non-empty results."""
+        if getattr(self, "_username", ""):
+            return self._username
+        try:
+            resp = self.session.get(
+                f"{THREADS_API_BASE}/me",
+                params={"fields": "username"},
+                timeout=10,
+            )
+            self._check_token_expiry(resp)
+            if resp.status_code == 200:
+                username = resp.json().get("username", "")
+                if username:
+                    self._username = username
+                    return username
+        except requests.RequestException:
+            pass
+        return ""
+
+    def _check_token_expiry(self, resp: requests.Response):
+        """Log a warning if the API returns 401/403 (likely token expired)."""
+        if resp.status_code in (401, 403):
+            logger.warning("Threads API returned %d — access token may be expired or revoked. "
+                           "Response: %s", resp.status_code, resp.text[:200])

@@ -87,13 +87,13 @@ class App(ctk.CTk):
         self._build_sidebar()
         self._build_content_area()
 
-        # Show dashboard by default
-        self._show_frame("dashboard")
-
         # Start polling the message queue + badge refresh
         self._poll_queue()
         self._update_sidebar_badges()
         self._badge_refresh_loop()
+
+        # Defer dashboard creation so the window renders instantly first
+        self.after(50, lambda: self._show_frame("dashboard"))
 
     def _build_sidebar(self):
         sidebar = ctk.CTkFrame(self, width=T.SIDEBAR_WIDTH, corner_radius=0,
@@ -264,7 +264,10 @@ class App(ctk.CTk):
                     logger.error("GUI callback error: %s", e)
         except queue.Empty:
             pass
-        self.after(200, self._poll_queue)
+        try:
+            self.after(200, self._poll_queue)
+        except (RuntimeError, Exception):
+            pass  # Widget destroyed during shutdown
 
     def run_in_gui(self, callback):
         """Schedule a callback to run on the GUI thread."""
@@ -317,6 +320,8 @@ class App(ctk.CTk):
 
     def _on_patrol_log(self, level: str, message: str):
         """Forward patrol log to monitor frame, buffering if not yet created."""
+        if self._shutting_down:
+            return
         if "monitor" not in self._frames:
             self._patrol_log_buffer.append((level, message))
             if len(self._patrol_log_buffer) > 200:
@@ -328,11 +333,16 @@ class App(ctk.CTk):
 
     def _on_new_posts(self, count: int):
         """Called when new posts are detected by patrol."""
+        if self._shutting_down:
+            return
         for name in ("dashboard", "monitor", "review"):
             if name in self._frames:
                 frame = self._frames[name]
-                if hasattr(frame, "refresh"):
-                    frame.refresh()
+                if hasattr(frame, "refresh") and frame.winfo_exists():
+                    try:
+                        frame.refresh()
+                    except Exception:
+                        pass
 
         self._update_sidebar_badges()
 
@@ -372,10 +382,20 @@ class App(ctk.CTk):
     def destroy(self):
         self._shutting_down = True
         if hasattr(self, "_badge_after_id"):
-            self.after_cancel(self._badge_after_id)
+            try:
+                self.after_cancel(self._badge_after_id)
+            except Exception:
+                pass
         # Non-blocking shutdown: don't wait for patrol thread to finish,
         # daemon threads are killed on process exit.
-        self.scheduler.stop(wait=False)
-        self.browser_manager.close()
-        self.db.close()
+        # Each cleanup step is isolated so one failure doesn't skip the rest.
+        for cleanup_name, cleanup_fn in [
+            ("scheduler", lambda: self.scheduler.stop(wait=False)),
+            ("browser", lambda: self.browser_manager.close()),
+            ("database", lambda: self.db.close()),
+        ]:
+            try:
+                cleanup_fn()
+            except Exception as e:
+                logger.error("Error during %s cleanup: %s", cleanup_name, e)
         super().destroy()
