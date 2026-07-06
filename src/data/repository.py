@@ -701,6 +701,49 @@ class Repository:
         )
         self.db.commit()
 
+    def cancel_all_pending_replies(self, platform: Optional[str] = None) -> int:
+        """Cancel all pending/retrying replies and reset their posts to pending.
+        Returns count cancelled."""
+        sql = "SELECT id, detected_post_id FROM reply_log WHERE status IN ('pending', 'retrying')"
+        params: list = []
+        if platform:
+            sql += " AND platform = ?"
+            params.append(platform)
+        rows = self.db.execute(sql, params).fetchall()
+        if not rows:
+            return 0
+        ids = [r["id"] for r in rows]
+        post_ids = list({r["detected_post_id"] for r in rows})
+        placeholders = ",".join("?" for _ in ids)
+        self.db.execute(
+            f"UPDATE reply_log SET status = 'cancelled' WHERE id IN ({placeholders})",
+            ids,
+        )
+        post_placeholders = ",".join("?" for _ in post_ids)
+        self.db.execute(
+            f"UPDATE detected_posts SET status = 'pending' WHERE id IN ({post_placeholders})",
+            post_ids,
+        )
+        self.db.commit()
+        return len(ids)
+
+    def bulk_soft_delete_replies(self, status: Optional[str] = None,
+                                  platform: Optional[str] = None) -> int:
+        """Soft-delete reply logs matching filters. Returns count deleted."""
+        sql = "UPDATE reply_log SET deleted_at = datetime('now', 'localtime') WHERE deleted_at IS NULL"
+        params: list = []
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        else:
+            sql += " AND status IN ('sent', 'cancelled', 'failed')"
+        if platform:
+            sql += " AND platform = ?"
+            params.append(platform)
+        cursor = self.db.execute(sql, params)
+        self.db.commit()
+        return cursor.rowcount
+
     def get_all_reply_logs(self, limit: int = 10000) -> list[dict]:
         """Get all reply logs for CSV export."""
         rows = self.db.execute(

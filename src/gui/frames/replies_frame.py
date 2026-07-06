@@ -110,11 +110,25 @@ class RepliesFrame(ctk.CTkFrame):
             text_color=T.TEXT_SECONDARY,
         ).pack(side="left", padx=T.PAD_LG)
 
+        ctk.CTkButton(
+            filter_inner, text="批次刪除紀錄", width=100, height=28,
+            font=T.font_caption(),
+            **T.BTN_GHOST_DANGER,
+            command=self._bulk_delete,
+        ).pack(side="right", padx=(T.PAD_XS, 0))
+
+        ctk.CTkButton(
+            filter_inner, text="全部取消待送出", width=110, height=28,
+            font=T.font_caption(),
+            **T.BTN_GHOST_DANGER,
+            command=self._cancel_all_pending,
+        ).pack(side="right", padx=T.PAD_XS)
+
         self._count_label = ctk.CTkLabel(
             filter_inner, text="", text_color=T.TEXT_TERTIARY,
             font=T.font_caption(),
         )
-        self._count_label.pack(side="right")
+        self._count_label.pack(side="right", padx=(0, T.PAD_SM))
 
         # Reply list
         self._scroll_frame = ctk.CTkScrollableFrame(
@@ -428,3 +442,67 @@ class RepliesFrame(ctk.CTkFrame):
             self.app.run_in_gui(_finish)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _cancel_all_pending(self):
+        platform = self._get_platform_filter()
+        pending = self.app.repo.count_reply_logs_filtered(status="pending", platform=platform)
+        retrying = self.app.repo.count_reply_logs_filtered(status="retrying", platform=platform)
+        total = pending + retrying
+        if total == 0:
+            show_toast(self, "沒有待送出的回覆", "info")
+            return
+
+        if CTkMessagebox:
+            scope = f"（{platform.capitalize()}）" if platform else ""
+            msg = CTkMessagebox(
+                title="確認批次取消",
+                message=f"確定要取消所有 {total} 則待送出的回覆{scope}？\n相關貼文會回到待處理狀態。",
+                icon="warning",
+                option_1="取消", option_2="確定",
+            )
+            if msg.get() != "確定":
+                return
+
+        cancelled = self.app.repo.cancel_all_pending_replies(platform=platform)
+        # Also clear in-memory scheduled send times
+        self.app.reply_engine._scheduled_send_time.clear()
+        self.app.repo.log_audit("BULK_CANCEL_PENDING", {
+            "count": cancelled, "platform": platform or "all",
+        })
+        show_toast(self, f"已取消 {cancelled} 則待送出回覆", "success")
+        self.refresh()
+
+    def _bulk_delete(self):
+        platform = self._get_platform_filter()
+        status = self._get_status_filter()
+        # Only allow bulk delete for terminal statuses
+        if status in ("pending", "sending", "retrying"):
+            show_toast(self, "請先篩選已送出、已取消或失敗的紀錄", "warning")
+            return
+
+        count = self.app.repo.count_reply_logs_filtered(
+            status=status, platform=platform, show_deleted=False,
+        )
+        if count == 0:
+            show_toast(self, "沒有可刪除的紀錄", "info")
+            return
+
+        status_label = self._STATUS_ZH.get(status, "已送出/已取消/失敗") if status else "已送出/已取消/失敗"
+        scope = f"（{platform.capitalize()}）" if platform else ""
+
+        if CTkMessagebox:
+            msg = CTkMessagebox(
+                title="確認批次刪除",
+                message=f"確定要刪除 {count} 筆「{status_label}」的回覆紀錄{scope}？\n紀錄會被標記為已刪除，可透過「顯示已刪除」查看。",
+                icon="warning",
+                option_1="取消", option_2="刪除",
+            )
+            if msg.get() != "刪除":
+                return
+
+        deleted = self.app.repo.bulk_soft_delete_replies(status=status, platform=platform)
+        self.app.repo.log_audit("BULK_DELETE_REPLIES", {
+            "count": deleted, "status": status or "terminal", "platform": platform or "all",
+        })
+        show_toast(self, f"已刪除 {deleted} 筆回覆紀錄", "success")
+        self.refresh()
