@@ -2,7 +2,6 @@
 
 import sqlite3
 import threading
-import weakref
 from typing import Optional
 
 SCHEMA_VERSION = 5
@@ -225,7 +224,7 @@ class Database:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self._local = threading.local()
-        self._all_conns: weakref.WeakSet[sqlite3.Connection] = weakref.WeakSet()
+        self._all_conns: set[sqlite3.Connection] = set()
         self._conn_lock = threading.Lock()
 
     @property
