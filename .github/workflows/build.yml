@@ -1,0 +1,62 @@
+name: Build Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'          # 推送 v1.0.0 等 tag 時自動打包
+  workflow_dispatch:   # 也可手動觸發
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium
+
+      - name: Build with PyInstaller
+        run: python -m PyInstaller sinopac_autoreply_win.spec --noconfirm
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SinoPacAutoReply-Windows
+          path: dist/SinoPacAutoReply/
+          retention-days: 30
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium
+
+      - name: Build with PyInstaller
+        run: python -m PyInstaller sinopac_autoreply.spec --noconfirm
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SinoPacAutoReply-macOS
+          path: dist/SinoPacAutoReply.app/
+          retention-days: 30

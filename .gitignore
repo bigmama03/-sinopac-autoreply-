@@ -5,6 +5,8 @@ __pycache__/
 dist/
 build/
 *.spec
+!sinopac_autoreply.spec
+!sinopac_autoreply_win.spec
 *.db
 *.sqlite
 *.sqlite3
