@@ -6,11 +6,24 @@ on:
       - 'v*'          # 推送 v1.0.0 等 tag 時自動打包
   workflow_dispatch:   # 也可手動觸發
 
+permissions:
+  contents: read
+
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,7 +34,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller==6.13.0
 
       - name: Install Playwright Chromium
         run: python -m playwright install chromium
@@ -32,17 +45,32 @@ jobs:
       - name: Bundle Playwright browsers
         run: python scripts/bundle_browsers.py
 
-      - name: Upload Windows artifact
+      - name: Build installer with Inno Setup
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.5
+        with:
+          path: installer/windows/installer.iss
+          options: /DMyAppVersion=${{ steps.version.outputs.version }}
+
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: SinoPacAutoReply-Windows
-          path: dist/SinoPacAutoReply/
+          name: SinoPacAutoReply-Windows-Installer
+          path: dist/SinoPacAutoReply-Setup-*.exe
           retention-days: 30
 
   build-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -53,7 +81,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller==6.13.0
 
       - name: Install Playwright Chromium
         run: python -m playwright install chromium
@@ -64,12 +92,12 @@ jobs:
       - name: Bundle Playwright browsers
         run: python scripts/bundle_browsers.py
 
-      - name: Zip macOS app bundle
-        run: cd dist && zip -r SinoPacAutoReply-macOS.zip SinoPacAutoReply.app
+      - name: Build DMG installer
+        run: bash installer/macos/create_dmg.sh ${{ steps.version.outputs.version }}
 
-      - name: Upload macOS artifact
+      - name: Upload macOS installer
         uses: actions/upload-artifact@v4
         with:
-          name: SinoPacAutoReply-macOS
-          path: dist/SinoPacAutoReply-macOS.zip
+          name: SinoPacAutoReply-macOS-Installer
+          path: dist/SinoPacAutoReply-Installer-*.dmg
           retention-days: 30

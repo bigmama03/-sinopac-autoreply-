@@ -1,0 +1,50 @@
+#!/bin/bash
+# Create macOS DMG installer for SinoPac AutoReply
+# Usage: bash installer/macos/create_dmg.sh [version]
+
+set -eu
+
+# Anchor to repository root (two levels up from this script)
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+APP_NAME="SinoPac AutoReply"
+APP_BUNDLE="SinoPacAutoReply.app"
+VERSION="${1:-1.0.0}"
+DMG_NAME="SinoPacAutoReply-Installer-${VERSION}"
+DIST_DIR="${REPO_ROOT}/dist"
+STAGING_DIR="${DIST_DIR}/dmg-staging"
+
+# Clean up staging on exit (success or failure)
+cleanup() { rm -rf "${STAGING_DIR}"; }
+trap cleanup EXIT
+
+echo "=== Building DMG: ${DMG_NAME}.dmg ==="
+
+# Clean up previous staging
+rm -rf "${STAGING_DIR}"
+mkdir -p "${STAGING_DIR}"
+
+# Verify .app exists
+if [ ! -d "${DIST_DIR}/${APP_BUNDLE}" ]; then
+    echo "ERROR: ${DIST_DIR}/${APP_BUNDLE} not found."
+    echo "Run PyInstaller first: python -m PyInstaller sinopac_autoreply.spec --noconfirm"
+    exit 1
+fi
+
+# Copy .app to staging
+echo "Copying ${APP_BUNDLE}..."
+cp -R "${DIST_DIR}/${APP_BUNDLE}" "${STAGING_DIR}/"
+
+# Create symlink to Applications folder
+ln -s /Applications "${STAGING_DIR}/Applications"
+
+# Create DMG
+echo "Creating DMG..."
+hdiutil create -volname "${APP_NAME}" \
+    -srcfolder "${STAGING_DIR}" \
+    -ov -format UDZO \
+    -imagekey zlib-level=9 \
+    "${DIST_DIR}/${DMG_NAME}.dmg"
+
+echo "=== Done: ${DIST_DIR}/${DMG_NAME}.dmg ==="
+ls -lh "${DIST_DIR}/${DMG_NAME}.dmg"
