@@ -32,11 +32,10 @@ UninstallDisplayName={#MyAppNameZH}
 ; SetupIconFile=..\..\assets\icons\icon.ico
 
 [Languages]
-Name: "tchinese"; MessagesFile: "compiler:Languages\ChineseTraditional.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "建立桌面捷徑(&D)"; GroupDescription: "附加圖示:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
 [Files]
 ; Copy the entire PyInstaller output folder
