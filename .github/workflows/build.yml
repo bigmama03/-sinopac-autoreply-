@@ -58,9 +58,12 @@ jobs:
       - name: Build with PyInstaller
         run: python -m PyInstaller sinopac_autoreply.spec --noconfirm
 
+      - name: Zip macOS app bundle
+        run: cd dist && zip -r SinoPacAutoReply-macOS.zip SinoPacAutoReply.app
+
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: SinoPacAutoReply-macOS
-          path: dist/SinoPacAutoReply.app/
+          path: dist/SinoPacAutoReply-macOS.zip
           retention-days: 30
