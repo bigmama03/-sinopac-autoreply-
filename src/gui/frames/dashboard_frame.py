@@ -603,8 +603,9 @@ class DashboardFrame(ctk.CTkFrame):
         self._live_counter_after_id = self.after(10000, self._start_live_counter_loop)
 
     def _stop_live_counter_loop(self):
-        if self._live_counter_after_id is not None:
-            self.after_cancel(self._live_counter_after_id)
+        after_id = getattr(self, '_live_counter_after_id', None)
+        if after_id is not None:
+            self.after_cancel(after_id)
             self._live_counter_after_id = None
 
     # ── Chart ──
