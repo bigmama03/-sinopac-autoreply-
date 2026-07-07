@@ -12,6 +12,9 @@ playwright_driver = os.path.join(
     os.path.dirname(__import__('playwright').__file__), 'driver'
 )
 
+# Playwright browsers are copied after build (see post-build script)
+# PyInstaller cannot process Chrome binaries, so we skip them in datas
+
 # Hidden imports that PyInstaller misses
 hidden_imports = [
     # APScheduler
@@ -60,7 +63,7 @@ a = Analysis(
     hiddenimports=hidden_imports + collect_submodules('playwright_stealth'),
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['runtime_hook_playwright.py'],
     excludes=['tkinter.test', 'unittest', 'pytest'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

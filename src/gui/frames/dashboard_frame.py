@@ -6,14 +6,14 @@ import threading
 import tkinter as tk
 from datetime import date, datetime, timedelta
 import customtkinter as ctk
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
-from matplotlib.ticker import MaxNLocator
 
 from src.gui import theme as T
+
+# Lazy-loaded matplotlib references (populated in _ensure_matplotlib)
+plt = None
+FigureCanvasTkAgg = None
+Figure = None
+MaxNLocator = None
 
 try:
     from CTkMessagebox import CTkMessagebox
@@ -839,7 +839,24 @@ class DashboardFrame(ctk.CTkFrame):
         except (ValueError, TypeError):
             return "-"
 
+    @staticmethod
+    def _ensure_matplotlib():
+        global plt, FigureCanvasTkAgg, Figure, MaxNLocator
+        if plt is not None:
+            return
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _plt
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as _FCA
+        from matplotlib.figure import Figure as _Fig
+        from matplotlib.ticker import MaxNLocator as _ML
+        plt = _plt
+        FigureCanvasTkAgg = _FCA
+        Figure = _Fig
+        MaxNLocator = _ML
+
     def _configure_matplotlib(self):
+        self._ensure_matplotlib()
         plt.rcParams["font.sans-serif"] = T.CHART_FONTS
         plt.rcParams["font.family"] = "sans-serif"
         plt.rcParams["axes.unicode_minus"] = False
@@ -855,7 +872,8 @@ class DashboardFrame(ctk.CTkFrame):
             self._chart_canvas = None
         if hasattr(self, "_fig") and self._fig is not None:
             self._fig.clf()
-            plt.close(self._fig)
+            if plt is not None:
+                plt.close(self._fig)
             self._fig = None
         super().destroy()
 

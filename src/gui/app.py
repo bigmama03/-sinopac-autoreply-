@@ -13,7 +13,6 @@ from src.core.compliance import ComplianceGate
 from src.core.ollama_judge import OllamaJudge
 from src.core.scheduler import PatrolScheduler
 from src.platforms.rate_limiter import PlatformRateLimiters
-from src.platforms.browser_manager import BrowserManager
 from src.gui import theme as T
 from config import APP_NAME_ZH, APP_VERSION, NEGATIVE_KEYWORDS
 
@@ -51,11 +50,12 @@ class App(ctk.CTk):
             on_log=_patrol_log_cb,
         )
         self.rate_limiters = PlatformRateLimiters()
-        browser_visible = self.repo.get_setting("browser_visible", "0") == "1"
-        self.browser_manager = BrowserManager(headless=not browser_visible)
+        # Lazy-load BrowserManager to speed up startup
+        self._browser_manager = None
+        self._browser_visible = self.repo.get_setting("browser_visible", "0") == "1"
         self.scheduler = PatrolScheduler(
             self.repo, self.reply_engine, self.rate_limiters,
-            browser_manager=self.browser_manager,
+            browser_manager=self.browser_manager,  # property, lazy-loaded
             on_new_posts=lambda count: self.run_in_gui(
                 lambda c=count: self._on_new_posts(c)
             ),
@@ -306,6 +306,14 @@ class App(ctk.CTk):
             pass
         self._badge_after_id = self.after(5000, self._badge_refresh_loop)
 
+    @property
+    def browser_manager(self):
+        """Lazy-load BrowserManager on first access."""
+        if self._browser_manager is None:
+            from src.platforms.browser_manager import BrowserManager
+            self._browser_manager = BrowserManager(headless=not self._browser_visible)
+        return self._browser_manager
+
     def _create_ollama_judge(self) -> OllamaJudge:
         """Build an Ollama judge instance from current repository settings."""
         ollama_url = self.repo.get_setting("ollama_url", "http://localhost:11434")
@@ -391,7 +399,7 @@ class App(ctk.CTk):
         # Each cleanup step is isolated so one failure doesn't skip the rest.
         for cleanup_name, cleanup_fn in [
             ("scheduler", lambda: self.scheduler.stop(wait=False)),
-            ("browser", lambda: self.browser_manager.close()),
+            ("browser", lambda: self._browser_manager.close() if self._browser_manager else None),
             ("database", lambda: self.db.close()),
         ]:
             try:

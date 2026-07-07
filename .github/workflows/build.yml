@@ -29,6 +29,9 @@ jobs:
       - name: Build with PyInstaller
         run: python -m PyInstaller sinopac_autoreply_win.spec --noconfirm
 
+      - name: Bundle Playwright browsers
+        run: python scripts/bundle_browsers.py
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
@@ -57,6 +60,9 @@ jobs:
 
       - name: Build with PyInstaller
         run: python -m PyInstaller sinopac_autoreply.spec --noconfirm
+
+      - name: Bundle Playwright browsers
+        run: python scripts/bundle_browsers.py
 
       - name: Zip macOS app bundle
         run: cd dist && zip -r SinoPacAutoReply-macOS.zip SinoPacAutoReply.app
