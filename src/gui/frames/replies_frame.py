@@ -44,6 +44,18 @@ class RepliesFrame(ctk.CTkFrame):
         )
         self._sending_btn.pack(side="right")
 
+        ctk.CTkButton(
+            title_row, text="批次刪除紀錄", width=100, height=30,
+            **T.BTN_GHOST_DANGER,
+            command=self._bulk_delete,
+        ).pack(side="right", padx=(0, T.PAD_SM))
+
+        ctk.CTkButton(
+            title_row, text="全部取消待送出", width=110, height=30,
+            **T.BTN_GHOST_DANGER,
+            command=self._cancel_all_pending,
+        ).pack(side="right", padx=(0, T.PAD_SM))
+
         self._pending_count_label = ctk.CTkLabel(
             title_row, text="", text_color=T.WARNING,
             font=T.font_small(),
@@ -110,25 +122,11 @@ class RepliesFrame(ctk.CTkFrame):
             text_color=T.TEXT_SECONDARY,
         ).pack(side="left", padx=T.PAD_LG)
 
-        ctk.CTkButton(
-            filter_inner, text="批次刪除紀錄", width=100, height=28,
-            font=T.font_caption(),
-            **T.BTN_GHOST_DANGER,
-            command=self._bulk_delete,
-        ).pack(side="right", padx=(T.PAD_XS, 0))
-
-        ctk.CTkButton(
-            filter_inner, text="全部取消待送出", width=110, height=28,
-            font=T.font_caption(),
-            **T.BTN_GHOST_DANGER,
-            command=self._cancel_all_pending,
-        ).pack(side="right", padx=T.PAD_XS)
-
         self._count_label = ctk.CTkLabel(
             filter_inner, text="", text_color=T.TEXT_TERTIARY,
             font=T.font_caption(),
         )
-        self._count_label.pack(side="right", padx=(0, T.PAD_SM))
+        self._count_label.pack(side="right")
 
         # Reply list
         self._scroll_frame = ctk.CTkScrollableFrame(
