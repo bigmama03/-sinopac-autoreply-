@@ -17,5 +17,9 @@ build/
 Thumbs.db
 *.log
 .claude/
+CLAUDE.md
+threads_api_test_payloads.json
+test_data/
+tests/
 venv/
 .venv/
