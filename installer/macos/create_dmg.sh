@@ -45,15 +45,20 @@ cp -R "${DIST_DIR}/${APP_BUNDLE}" "${STAGING_DIR}/"
 # signed before the outer bundle, otherwise codesign --deep fails.
 echo "Signing ${APP_BUNDLE} (ad-hoc, inside-out)..."
 
-# 1. Sign nested .app bundles (e.g. Playwright Chrome) first
-find "${STAGING_DIR}/${APP_BUNDLE}" -name "*.app" -depth -not -path "${STAGING_DIR}/${APP_BUNDLE}" | while read -r nested; do
-    echo "  Signing nested: ${nested##*/}"
-    codesign --force --sign - "$nested" 2>/dev/null || true
+# 1. Sign shared libraries, frameworks, and plugins (deepest first)
+find "${STAGING_DIR}/${APP_BUNDLE}" -depth \
+    \( -name "*.dylib" -o -name "*.so" -o -name "*.framework" \
+       -o -name "*.xpc" -o -name "*.appex" -o -name "*.plugin" \) -print0 |
+while IFS= read -r -d '' item; do
+    codesign --force --sign - "$item"
 done
 
-# 2. Sign all shared libraries and executables
-find "${STAGING_DIR}/${APP_BUNDLE}" \( -name "*.dylib" -o -name "*.so" \) | while read -r lib; do
-    codesign --force --sign - "$lib" 2>/dev/null || true
+# 2. Sign nested .app bundles deepest-first (e.g. Playwright Chrome)
+find "${STAGING_DIR}/${APP_BUNDLE}" -depth -name "*.app" \
+    ! -path "${STAGING_DIR}/${APP_BUNDLE}" -print0 |
+while IFS= read -r -d '' nested; do
+    echo "  Signing nested: ${nested##*/}"
+    codesign --force --sign - "$nested"
 done
 
 # 3. Sign the main bundle last
