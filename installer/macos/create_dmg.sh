@@ -35,6 +35,19 @@ fi
 echo "Copying ${APP_BUNDLE}..."
 cp -R "${DIST_DIR}/${APP_BUNDLE}" "${STAGING_DIR}/"
 
+# Ad-hoc code sign to avoid "app is damaged" Gatekeeper error.
+# Without this, macOS quarantines unsigned apps downloaded from the internet
+# and shows a misleading "damaged" dialog with no option to open.
+# Ad-hoc signing changes the behavior to "unidentified developer", which
+# users can bypass via right-click > Open.
+echo "Signing ${APP_BUNDLE} (ad-hoc)..."
+codesign --force --deep --sign - "${STAGING_DIR}/${APP_BUNDLE}"
+echo "Verifying signature..."
+codesign --verify --verbose "${STAGING_DIR}/${APP_BUNDLE}" || echo "WARN: signature verification failed (non-fatal)"
+
+# Remove quarantine attributes from the staged copy
+xattr -cr "${STAGING_DIR}/${APP_BUNDLE}"
+
 # Create symlink to Applications folder
 ln -s /Applications "${STAGING_DIR}/Applications"
 
