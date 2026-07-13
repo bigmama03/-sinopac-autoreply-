@@ -3,7 +3,7 @@
 
 import os
 import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -60,7 +60,8 @@ a = Analysis(
         ('assets', 'assets'),
     ] + collect_data_files('customtkinter')
       + collect_data_files('CTkMessagebox')
-      + collect_data_files('playwright_stealth'),
+      + collect_data_files('playwright_stealth')
+      + collect_data_files('matplotlib'),
     hiddenimports=hidden_imports + collect_submodules('playwright_stealth'),
     hookspath=[],
     hooksconfig={},

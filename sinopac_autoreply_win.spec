@@ -63,7 +63,8 @@ a = Analysis(
         ('assets', 'assets'),
     ] + collect_data_files('customtkinter')
       + collect_data_files('CTkMessagebox')
-      + collect_data_files('playwright_stealth'),
+      + collect_data_files('playwright_stealth')
+      + collect_data_files('matplotlib'),
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},

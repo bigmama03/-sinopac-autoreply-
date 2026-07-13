@@ -623,6 +623,8 @@ class DashboardFrame(ctk.CTkFrame):
         self._update_chart()
 
     def _on_range_preset(self, value: str):
+        if not self._matplotlib_ok:
+            return
         days = self._RANGE_PRESETS.get(value, 7)
         today = date.today()
         self._start_date_var.set((today - timedelta(days=days - 1)).strftime("%Y-%m-%d"))
@@ -630,6 +632,8 @@ class DashboardFrame(ctk.CTkFrame):
         self._update_chart()
 
     def _on_date_apply(self):
+        if not self._matplotlib_ok:
+            return
         self._update_chart()
 
     @staticmethod
@@ -866,16 +870,16 @@ class DashboardFrame(ctk.CTkFrame):
         """Attempt to load matplotlib. Returns True on success."""
         try:
             self._ensure_matplotlib()
-            plt.rcParams["font.sans-serif"] = T.CHART_FONTS
-            plt.rcParams["font.family"] = "sans-serif"
-            plt.rcParams["axes.unicode_minus"] = False
-            return True
-        except Exception:
+        except (ImportError, ModuleNotFoundError):
             import logging
             logging.getLogger(__name__).warning(
                 "matplotlib/numpy import failed — chart disabled", exc_info=True,
             )
             return False
+        plt.rcParams["font.sans-serif"] = T.CHART_FONTS
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["axes.unicode_minus"] = False
+        return True
 
     def destroy(self):
         self._destroyed = True
