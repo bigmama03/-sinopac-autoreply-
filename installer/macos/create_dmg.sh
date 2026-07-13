@@ -41,27 +41,20 @@ cp -R "${DIST_DIR}/${APP_BUNDLE}" "${STAGING_DIR}/"
 # Ad-hoc signing changes the behavior to "unidentified developer", which
 # users can bypass via right-click > Open.
 #
-# Sign inside-out: nested bundles (e.g. Playwright's Chrome.app) must be
-# signed before the outer bundle, otherwise codesign --deep fails.
+# Sign inside-out, excluding Playwright's bundled Chrome (it ships with
+# Google's own signature and has an ambiguous bundle format that codesign
+# cannot re-sign).
 echo "Signing ${APP_BUNDLE} (ad-hoc, inside-out)..."
 
-# 1. Sign shared libraries, frameworks, and plugins (deepest first)
+# 1. Sign our shared libraries (skip ms-playwright — Chrome is pre-signed)
 find "${STAGING_DIR}/${APP_BUNDLE}" -depth \
-    \( -name "*.dylib" -o -name "*.so" -o -name "*.framework" \
-       -o -name "*.xpc" -o -name "*.appex" -o -name "*.plugin" \) -print0 |
+    \( -name "*.dylib" -o -name "*.so" \) \
+    ! -path "*/ms-playwright/*" -print0 |
 while IFS= read -r -d '' item; do
     codesign --force --sign - "$item"
 done
 
-# 2. Sign nested .app bundles deepest-first (e.g. Playwright Chrome)
-find "${STAGING_DIR}/${APP_BUNDLE}" -depth -name "*.app" \
-    ! -path "${STAGING_DIR}/${APP_BUNDLE}" -print0 |
-while IFS= read -r -d '' nested; do
-    echo "  Signing nested: ${nested##*/}"
-    codesign --force --sign - "$nested"
-done
-
-# 3. Sign the main bundle last
+# 2. Sign the main bundle last (without --deep to avoid Chrome re-sign)
 codesign --force --sign - "${STAGING_DIR}/${APP_BUNDLE}"
 
 echo "Verifying signature..."
