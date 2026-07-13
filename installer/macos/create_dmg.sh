@@ -44,6 +44,9 @@ cp -R "${DIST_DIR}/${APP_BUNDLE}" "${STAGING_DIR}/"
 # Sign inside-out, excluding Playwright's bundled Chrome (it ships with
 # Google's own signature and has an ambiguous bundle format that codesign
 # cannot re-sign).
+# Remove Playwright marker files that codesign treats as unsigned code objects
+find "${STAGING_DIR}/${APP_BUNDLE}" -name "INSTALLATION_COMPLETE" -delete
+
 echo "Signing ${APP_BUNDLE} (ad-hoc, inside-out)..."
 
 # 1. Sign our libs, frameworks, and bundles (skip ms-playwright — Chrome is pre-signed)
