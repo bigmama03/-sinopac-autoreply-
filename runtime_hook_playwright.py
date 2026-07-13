@@ -8,6 +8,7 @@ if getattr(sys, 'frozen', False):
     for candidate in [
         os.path.join(base_dir, 'ms-playwright'),
         os.path.join(os.path.dirname(base_dir), 'Frameworks', 'ms-playwright'),
+        os.path.join(os.path.dirname(base_dir), 'Resources', 'ms-playwright'),
     ]:
         if os.path.isdir(candidate):
             os.environ['PLAYWRIGHT_BROWSERS_PATH'] = candidate

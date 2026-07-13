@@ -44,6 +44,17 @@ cp -R "${DIST_DIR}/${APP_BUNDLE}" "${STAGING_DIR}/"
 # Sign inside-out, excluding Playwright's bundled Chrome (it ships with
 # Google's own signature and has an ambiguous bundle format that codesign
 # cannot re-sign).
+# Move Playwright browsers out of Frameworks → Resources so codesign
+# doesn't try to validate Chrome's ambiguous nested .app bundle.
+# (codesign inspects Contents/Frameworks/ subcomponents but skips Resources/)
+PW_FW="${STAGING_DIR}/${APP_BUNDLE}/Contents/Frameworks/ms-playwright"
+PW_RES="${STAGING_DIR}/${APP_BUNDLE}/Contents/Resources/ms-playwright"
+if [ -d "${PW_FW}" ]; then
+    echo "Moving ms-playwright from Frameworks/ to Resources/..."
+    mkdir -p "$(dirname "${PW_RES}")"
+    mv "${PW_FW}" "${PW_RES}"
+fi
+
 # Remove Playwright marker files that codesign treats as unsigned code objects
 find "${STAGING_DIR}/${APP_BUNDLE}" -name "INSTALLATION_COMPLETE" -delete
 
