@@ -46,10 +46,9 @@ cp -R "${DIST_DIR}/${APP_BUNDLE}" "${STAGING_DIR}/"
 # cannot re-sign).
 echo "Signing ${APP_BUNDLE} (ad-hoc, inside-out)..."
 
-# 1. Sign our shared libraries (skip ms-playwright — Chrome is pre-signed)
-find "${STAGING_DIR}/${APP_BUNDLE}" -depth \
-    \( -name "*.dylib" -o -name "*.so" \) \
-    ! -path "*/ms-playwright/*" -print0 |
+# 1. Sign our libs, frameworks, and bundles (skip ms-playwright — Chrome is pre-signed)
+find "${STAGING_DIR}/${APP_BUNDLE}" -path "*/ms-playwright" -prune -o \
+    \( -name "*.dylib" -o -name "*.so" -o -name "*.framework" \) -print0 |
 while IFS= read -r -d '' item; do
     codesign --force --sign - "$item"
 done
