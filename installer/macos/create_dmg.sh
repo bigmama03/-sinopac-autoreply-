@@ -40,8 +40,25 @@ cp -R "${DIST_DIR}/${APP_BUNDLE}" "${STAGING_DIR}/"
 # and shows a misleading "damaged" dialog with no option to open.
 # Ad-hoc signing changes the behavior to "unidentified developer", which
 # users can bypass via right-click > Open.
-echo "Signing ${APP_BUNDLE} (ad-hoc)..."
-codesign --force --deep --sign - "${STAGING_DIR}/${APP_BUNDLE}"
+#
+# Sign inside-out: nested bundles (e.g. Playwright's Chrome.app) must be
+# signed before the outer bundle, otherwise codesign --deep fails.
+echo "Signing ${APP_BUNDLE} (ad-hoc, inside-out)..."
+
+# 1. Sign nested .app bundles (e.g. Playwright Chrome) first
+find "${STAGING_DIR}/${APP_BUNDLE}" -name "*.app" -depth -not -path "${STAGING_DIR}/${APP_BUNDLE}" | while read -r nested; do
+    echo "  Signing nested: ${nested##*/}"
+    codesign --force --sign - "$nested" 2>/dev/null || true
+done
+
+# 2. Sign all shared libraries and executables
+find "${STAGING_DIR}/${APP_BUNDLE}" \( -name "*.dylib" -o -name "*.so" \) | while read -r lib; do
+    codesign --force --sign - "$lib" 2>/dev/null || true
+done
+
+# 3. Sign the main bundle last
+codesign --force --sign - "${STAGING_DIR}/${APP_BUNDLE}"
+
 echo "Verifying signature..."
 codesign --verify --verbose "${STAGING_DIR}/${APP_BUNDLE}" || echo "WARN: signature verification failed (non-fatal)"
 
