@@ -49,7 +49,9 @@ hidden_imports = [
     'pyee',
 ] + collect_submodules('playwright') \
   + collect_submodules('customtkinter') \
-  + collect_submodules('playwright_stealth')
+  + collect_submodules('playwright_stealth') \
+  + collect_submodules('numpy') \
+  + collect_submodules('matplotlib')
 
 a = Analysis(
     ['main.py'],

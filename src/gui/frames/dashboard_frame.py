@@ -122,7 +122,7 @@ class DashboardFrame(ctk.CTkFrame):
     _COMING_SOON_PLATS = {"facebook", "instagram"}
 
     def __init__(self, parent, app):
-        self._configure_matplotlib()
+        self._matplotlib_ok = self._try_configure_matplotlib()
         super().__init__(parent, fg_color="transparent")
         self.app = app
         self._destroyed = False
@@ -270,102 +270,108 @@ class DashboardFrame(ctk.CTkFrame):
                                   sticky="ew", padx=T.PAD_XS, pady=(0, T.PAD_XS))
         chart_card.grid_columnconfigure(0, weight=1)
 
-        row0 = ctk.CTkFrame(chart_card, fg_color="transparent")
-        row0.grid(row=0, column=0, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_MD, 0))
-        row0.grid_columnconfigure(1, weight=1)
+        if not self._matplotlib_ok:
+            ctk.CTkLabel(
+                chart_card, text="圖表元件載入失敗（matplotlib / numpy 未正確打包）",
+                text_color=T.TEXT_TERTIARY, font=T.font_body(),
+            ).grid(row=0, column=0, pady=T.PAD_XL)
+        else:
+            row0 = ctk.CTkFrame(chart_card, fg_color="transparent")
+            row0.grid(row=0, column=0, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_MD, 0))
+            row0.grid_columnconfigure(1, weight=1)
 
-        controls = ctk.CTkFrame(row0, fg_color="transparent")
-        controls.grid(row=0, column=1, sticky="e")
+            controls = ctk.CTkFrame(row0, fg_color="transparent")
+            controls.grid(row=0, column=1, sticky="e")
 
-        self._period_seg = ctk.CTkSegmentedButton(
-            controls, values=["日", "週", "月"],
-            command=self._on_period_change,
-            fg_color=T.NAVY_600, selected_color=T.GOLD_500,
-            selected_hover_color=T.GOLD_400,
-            unselected_color=T.NAVY_700,
-            unselected_hover_color=T.NAVY_500,
-            text_color=T.TEXT_PRIMARY,
-            text_color_disabled=T.TEXT_TERTIARY,
-        )
-        self._period_seg.set("日")
-        self._period_seg.pack(side="left", padx=(0, T.PAD_MD))
+            self._period_seg = ctk.CTkSegmentedButton(
+                controls, values=["日", "週", "月"],
+                command=self._on_period_change,
+                fg_color=T.NAVY_600, selected_color=T.GOLD_500,
+                selected_hover_color=T.GOLD_400,
+                unselected_color=T.NAVY_700,
+                unselected_hover_color=T.NAVY_500,
+                text_color=T.TEXT_PRIMARY,
+                text_color_disabled=T.TEXT_TERTIARY,
+            )
+            self._period_seg.set("日")
+            self._period_seg.pack(side="left", padx=(0, T.PAD_MD))
 
-        self._chart_platform_var = ctk.StringVar(value="全部")
-        ctk.CTkOptionMenu(
-            controls, values=["全部", "Threads", "Facebook", "Instagram"],
-            variable=self._chart_platform_var,
-            command=self._on_chart_filter_change,
-            width=120,
-            fg_color=T.NAVY_700, button_color=T.NAVY_600,
-            button_hover_color=T.NAVY_500,
-            dropdown_fg_color=T.BG_ELEVATED,
-            text_color=T.TEXT_PRIMARY,
-        ).pack(side="left")
+            self._chart_platform_var = ctk.StringVar(value="全部")
+            ctk.CTkOptionMenu(
+                controls, values=["全部", "Threads", "Facebook", "Instagram"],
+                variable=self._chart_platform_var,
+                command=self._on_chart_filter_change,
+                width=120,
+                fg_color=T.NAVY_700, button_color=T.NAVY_600,
+                button_hover_color=T.NAVY_500,
+                dropdown_fg_color=T.BG_ELEVATED,
+                text_color=T.TEXT_PRIMARY,
+            ).pack(side="left")
 
-        # Date range controls
-        row1 = ctk.CTkFrame(chart_card, fg_color="transparent")
-        row1.grid(row=1, column=0, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_SM, T.PAD_SM))
+            # Date range controls
+            row1 = ctk.CTkFrame(chart_card, fg_color="transparent")
+            row1.grid(row=1, column=0, sticky="ew", padx=T.PAD_MD, pady=(T.PAD_SM, T.PAD_SM))
 
-        today = date.today()
-        default_start = (today - timedelta(days=6)).strftime("%Y-%m-%d")
-        default_end = today.strftime("%Y-%m-%d")
+            today = date.today()
+            default_start = (today - timedelta(days=6)).strftime("%Y-%m-%d")
+            default_end = today.strftime("%Y-%m-%d")
 
-        ctk.CTkLabel(row1, text="起始", font=T.font_small(),
-                     text_color=T.TEXT_SECONDARY).pack(side="left")
-        self._start_date_var = ctk.StringVar(value=default_start)
-        self._start_entry = ctk.CTkEntry(
-            row1, textvariable=self._start_date_var, width=100,
-            placeholder_text="YYYY-MM-DD",
-            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
-            text_color=T.TEXT_PRIMARY,
-        )
-        self._start_entry.pack(side="left", padx=(T.PAD_XS, T.PAD_SM))
+            ctk.CTkLabel(row1, text="起始", font=T.font_small(),
+                         text_color=T.TEXT_SECONDARY).pack(side="left")
+            self._start_date_var = ctk.StringVar(value=default_start)
+            self._start_entry = ctk.CTkEntry(
+                row1, textvariable=self._start_date_var, width=100,
+                placeholder_text="YYYY-MM-DD",
+                fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+                text_color=T.TEXT_PRIMARY,
+            )
+            self._start_entry.pack(side="left", padx=(T.PAD_XS, T.PAD_SM))
 
-        ctk.CTkLabel(row1, text="結束", font=T.font_small(),
-                     text_color=T.TEXT_SECONDARY).pack(side="left")
-        self._end_date_var = ctk.StringVar(value=default_end)
-        self._end_entry = ctk.CTkEntry(
-            row1, textvariable=self._end_date_var, width=100,
-            placeholder_text="YYYY-MM-DD",
-            fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
-            text_color=T.TEXT_PRIMARY,
-        )
-        self._end_entry.pack(side="left", padx=(T.PAD_XS, T.PAD_MD))
+            ctk.CTkLabel(row1, text="結束", font=T.font_small(),
+                         text_color=T.TEXT_SECONDARY).pack(side="left")
+            self._end_date_var = ctk.StringVar(value=default_end)
+            self._end_entry = ctk.CTkEntry(
+                row1, textvariable=self._end_date_var, width=100,
+                placeholder_text="YYYY-MM-DD",
+                fg_color=T.BG_INPUT, border_color=T.BORDER_DEFAULT,
+                text_color=T.TEXT_PRIMARY,
+            )
+            self._end_entry.pack(side="left", padx=(T.PAD_XS, T.PAD_MD))
 
-        ctk.CTkButton(
-            row1, text="套用", width=50, height=28,
-            **T.BTN_GHOST_ACCENT,
-            command=self._on_date_apply,
-        ).pack(side="left", padx=(0, T.PAD_MD))
+            ctk.CTkButton(
+                row1, text="套用", width=50, height=28,
+                **T.BTN_GHOST_ACCENT,
+                command=self._on_date_apply,
+            ).pack(side="left", padx=(0, T.PAD_MD))
 
-        self._range_seg = ctk.CTkSegmentedButton(
-            row1, values=list(self._RANGE_PRESETS.keys()),
-            command=self._on_range_preset,
-            fg_color=T.NAVY_600, selected_color=T.GOLD_500,
-            selected_hover_color=T.GOLD_400,
-            unselected_color=T.NAVY_700,
-            unselected_hover_color=T.NAVY_500,
-            text_color=T.TEXT_PRIMARY,
-        )
-        self._range_seg.set("近7天")
-        self._range_seg.pack(side="left")
+            self._range_seg = ctk.CTkSegmentedButton(
+                row1, values=list(self._RANGE_PRESETS.keys()),
+                command=self._on_range_preset,
+                fg_color=T.NAVY_600, selected_color=T.GOLD_500,
+                selected_hover_color=T.GOLD_400,
+                unselected_color=T.NAVY_700,
+                unselected_hover_color=T.NAVY_500,
+                text_color=T.TEXT_PRIMARY,
+            )
+            self._range_seg.set("近7天")
+            self._range_seg.pack(side="left")
 
-        # Chart canvas
-        self._fig = Figure(figsize=(8, 3), dpi=100)
-        self._fig.set_facecolor(T.CHART_BG)
-        self._ax = self._fig.add_subplot(111)
-        self._chart_container = tk.Frame(chart_card, bg=T.CHART_BG,
-                                         highlightthickness=0, height=250)
-        self._chart_container.grid(row=2, column=0, sticky="ew",
-                                   padx=T.PAD_XS, pady=(0, T.PAD_SM))
-        self._chart_container.grid_propagate(False)
-        self._chart_container.grid_columnconfigure(0, weight=1)
-        self._chart_container.grid_rowconfigure(0, weight=1)
-        self._chart_canvas = FigureCanvasTkAgg(self._fig, master=self._chart_container)
-        canvas_widget = self._chart_canvas.get_tk_widget()
-        canvas_widget.configure(highlightthickness=0)
-        canvas_widget.grid(row=0, column=0, sticky="nsew")
-        self._style_axis(self._ax)
+            # Chart canvas
+            self._fig = Figure(figsize=(8, 3), dpi=100)
+            self._fig.set_facecolor(T.CHART_BG)
+            self._ax = self._fig.add_subplot(111)
+            self._chart_container = tk.Frame(chart_card, bg=T.CHART_BG,
+                                             highlightthickness=0, height=250)
+            self._chart_container.grid(row=2, column=0, sticky="ew",
+                                       padx=T.PAD_XS, pady=(0, T.PAD_SM))
+            self._chart_container.grid_propagate(False)
+            self._chart_container.grid_columnconfigure(0, weight=1)
+            self._chart_container.grid_rowconfigure(0, weight=1)
+            self._chart_canvas = FigureCanvasTkAgg(self._fig, master=self._chart_container)
+            canvas_widget = self._chart_canvas.get_tk_widget()
+            canvas_widget.configure(highlightthickness=0)
+            canvas_widget.grid(row=0, column=0, sticky="nsew")
+            self._style_axis(self._ax)
 
         # ── Row 6-7: Patrol history ──
         T.section_title(self._inner, "海巡紀錄", row=6)
@@ -635,7 +641,7 @@ class DashboardFrame(ctk.CTkFrame):
             return False
 
     def _update_chart(self):
-        if self._destroyed:
+        if self._destroyed or not self._matplotlib_ok:
             return
         period = self._PERIOD_MAP.get(self._period_seg.get(), "day")
         platform = self._PLATFORM_MAP.get(self._chart_platform_var.get())
@@ -856,22 +862,31 @@ class DashboardFrame(ctk.CTkFrame):
         Figure = _Fig
         MaxNLocator = _ML
 
-    def _configure_matplotlib(self):
-        self._ensure_matplotlib()
-        plt.rcParams["font.sans-serif"] = T.CHART_FONTS
-        plt.rcParams["font.family"] = "sans-serif"
-        plt.rcParams["axes.unicode_minus"] = False
+    def _try_configure_matplotlib(self) -> bool:
+        """Attempt to load matplotlib. Returns True on success."""
+        try:
+            self._ensure_matplotlib()
+            plt.rcParams["font.sans-serif"] = T.CHART_FONTS
+            plt.rcParams["font.family"] = "sans-serif"
+            plt.rcParams["axes.unicode_minus"] = False
+            return True
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "matplotlib/numpy import failed — chart disabled", exc_info=True,
+            )
+            return False
 
     def destroy(self):
         self._destroyed = True
         self._stop_live_counter_loop()
         self._unbind_mousewheel(None)
-        if hasattr(self, "_chart_canvas") and self._chart_canvas is not None:
+        if self._matplotlib_ok and hasattr(self, "_chart_canvas") and self._chart_canvas is not None:
             if hasattr(self._chart_canvas, "close_event"):
                 self._chart_canvas.close_event()
             self._chart_canvas.get_tk_widget().destroy()
             self._chart_canvas = None
-        if hasattr(self, "_fig") and self._fig is not None:
+        if self._matplotlib_ok and hasattr(self, "_fig") and self._fig is not None:
             self._fig.clf()
             if plt is not None:
                 plt.close(self._fig)

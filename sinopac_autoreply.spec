@@ -3,7 +3,7 @@
 
 import os
 import sys
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_dynamic_libs
 
 block_cipher = None
 
@@ -47,7 +47,8 @@ hidden_imports = [
     'plyer.platforms.macosx.notification',
     'greenlet',
     'pyee',
-] + collect_submodules('playwright') + collect_submodules('customtkinter')
+] + collect_submodules('playwright') + collect_submodules('customtkinter') \
+  + collect_submodules('numpy') + collect_submodules('matplotlib')
 
 a = Analysis(
     ['main.py'],
